@@ -1,13 +1,19 @@
+<p align="center">
+  <img src="assets/title.png" alt="svg 3dx core" width="360"/>
+</p>
+
 # svg3dx-core
 
 svg3dx 官方**引擎库**：在 Rust 中解析与求值，经 WASM / C ABI 供给查看器组件、编辑器与桌面宿主。
 
-| 相关仓库 | 职责 |
-|----------|------|
-| [svg3dx](../svg3dx) | 格式规范与 samples（`SVG3DX_ROOT`） |
+## 关联库
+
+| 仓库 | 职责 |
+|------|------|
+| [svg3dx](https://github.com/xiaohunqupo/svg3dx) | 格式规范与 samples（`SVG3DX_ROOT`） |
 | **svg3dx-core**（本仓） | 解析求值 + WASM + C ABI |
-| [svg3dx-viewer](../svg3dx-viewer) | 可嵌入的**查看器组件** |
-| [svg3dx-studio](../svg3dx-studio) | **svg3dx 编辑器** |
+| [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer) | 可嵌入的**查看器组件** |
+| [svg3dx-studio](https://github.com/xiaohunqupo/svg3dx-studio) | **svg3dx 编辑器** |
 
 ## 架构
 
@@ -26,6 +32,7 @@ svg3dx-core (Rust)  →  几何指令序列 (JSON)
 
 ```
 svg3dx-core/
+├── assets/                # Logo 与标题图
 ├── crates/
 │   ├── svg3dx-core/       # 解析与求值
 │   ├── svg3dx-ffi-wasm/   # wasm-bindgen
