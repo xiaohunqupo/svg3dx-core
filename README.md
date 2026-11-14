@@ -4,52 +4,54 @@
 
 # svg3dx-core
 
-svg3dx 官方**引擎库**：在 Rust 中解析与求值，经 WASM / C ABI 供给查看器组件、编辑器与桌面宿主。
+[中文](README.zh-CN.md) | English
 
-## 关联库
+Official **engine library** for svg3dx: parse and evaluate in Rust, then expose WASM / C ABI to viewer components, editors, and desktop hosts.
 
-| 仓库 | 职责 |
-|------|------|
-| [svg3dx](https://github.com/xiaohunqupo/svg3dx) | 格式规范与 samples（`SVG3DX_ROOT`） |
-| **svg3dx-core**（本仓） | 解析求值 + WASM + C ABI |
-| [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer) | 可嵌入的**查看器组件** |
-| [svg3dx-studio](https://github.com/xiaohunqupo/svg3dx-studio) | **svg3dx 编辑器** |
+## Related libraries
 
-## 架构
+| Repository | Role |
+|------------|------|
+| [svg3dx](https://github.com/xiaohunqupo/svg3dx) | Format specification and samples (`SVG3DX_ROOT`) |
+| **svg3dx-core** (this repo) | Parse / evaluate + WASM + C ABI |
+| [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer) | Embeddable **viewer component** |
+| [svg3dx-studio](https://github.com/xiaohunqupo/svg3dx-studio) | **svg3dx editor** |
+
+## Architecture
 
 ```
-svg3dx-core (Rust)  →  几何指令序列 (JSON)
+svg3dx-core (Rust)  →  geometry instruction sequence (JSON)
         │
    ┌────┴────┐
  WASM FFI   C ABI
 ```
 
-不做网格、布尔实体运算或渲染——那是宿主（viewer / OCCT 等）的职责。
+No meshing, solid boolean kernels, or rendering — that belongs to the host (viewer / OCCT / etc.).
 
-**会话 API**：`DocumentSession`（WASM：`Svg3dxSession`，C：`svg3dx_session_*`）支持解析一次后改参重算，返回带稳定 `node_id` 的 `UpdateResult`（全量结果 + 节点 diff），供 viewer / studio 局部更新场景。
+**Session API:** `DocumentSession` (WASM: `Svg3dxSession`, C: `svg3dx_session_*`) parses once, then re-evaluates after param patches, returning an `UpdateResult` with stable `node_id`s (full result + node-level diffs) so viewer / studio can update the scene locally.
 
-## 仓库结构
+## Repository layout
 
 ```
 svg3dx-core/
-├── assets/                # Logo 与标题图
+├── assets/                # Logo and title artwork
 ├── crates/
-│   ├── svg3dx-core/       # 解析与求值
+│   ├── svg3dx-core/       # Parse and evaluate
 │   ├── svg3dx-ffi-wasm/   # wasm-bindgen
 │   └── svg3dx-ffi-c/      # C ABI → svg3dx_core.dll
-├── cpp/                   # 头文件 + dump_json
-├── pkg/                   # wasm-pack 产出（构建后）
+├── cpp/                   # Headers + dump_json
+├── pkg/                   # wasm-pack output (after build)
 ├── scripts/build-release.ps1
 └── docs/
 ```
 
-## 构建
+## Build
 
 ```powershell
 .\scripts\build-release.ps1
 ```
 
-或手动：
+Or manually:
 
 ```bash
 cargo test -p svg3dx-core
@@ -63,10 +65,10 @@ cmake -S cpp -B cpp/build && cmake --build cpp/build
   --dll .\target\release\svg3dx_core.dll
 ```
 
-## 多仓关系
+## Multi-repo layout
 
-详见 [docs/REPOS.md](docs/REPOS.md)。
+See [docs/REPOS.md](docs/REPOS.md).
 
-## 许可证
+## License
 
-MIT OR MulanPSL-2.0（与规范仓一致）。
+MIT OR MulanPSL-2.0 (same as the format repo).
