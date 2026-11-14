@@ -1,0 +1,17 @@
+[package]
+name = "svg3dx-ffi-c"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "C ABI exports for svg3dx-core"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+name = "svg3dx_core"
+doctest = false
+
+[dependencies]
+svg3dx-core = { workspace = true }
+serde_json = { workspace = true }
