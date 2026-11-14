@@ -40,7 +40,7 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
             "topWidth",
         ],
         PrimitiveKind::Prism => &["points", "height", "normal"],
-        PrimitiveKind::CutCylinder => &["diameter", "bottomCenterPt", "topCenterPt", "angle"],
+        PrimitiveKind::SectorCylinder => &["diameter", "bottomCenterPt", "topCenterPt", "angle"],
         PrimitiveKind::Extrude => &["dir", "length", "profile"],
         PrimitiveKind::Revolve => &["axisOrigin", "axisDir", "angle", "profile"],
         PrimitiveKind::Loft => &["solid", "ruled", "profiles"],
