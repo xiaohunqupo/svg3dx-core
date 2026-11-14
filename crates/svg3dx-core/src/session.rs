@@ -6,7 +6,7 @@ use crate::diff::{all_added, diff_instructions, NodeChange};
 use crate::error::{Error, Result};
 use crate::eval::{evaluate_document, EvalOptions};
 use crate::instruction::EvaluationResult;
-use crate::params::Value;
+use crate::params::{filter_external_params, is_direct_param_value, Value};
 use crate::parser::{parse_xml, Document};
 
 /// Declared custom property discovered in the document (class rules / inline).
@@ -14,8 +14,11 @@ use crate::parser::{parse_xml, Document};
 pub struct ParamDesc {
     pub name: String,
     pub default: Option<Value>,
-    /// Class names that declare this property (if any).
+    /// Class names / `:root` that declare this property (if any).
     pub sources: Vec<String>,
+    /// True only for direct `:root` literals — the only keys hosts may pass externally.
+    #[serde(default)]
+    pub external: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -93,6 +96,7 @@ impl DocumentSession {
     }
 
     /// Replace the entire external parameter map and re-evaluate.
+    /// Keys outside the `:root` direct-literal whitelist are ignored (evaluation warnings).
     pub fn set_params(&mut self, params: HashMap<String, Value>) -> Result<UpdateResult> {
         let next = normalize_param_map(params);
         let changed = param_keys_changed(&self.external, &next);
@@ -101,6 +105,7 @@ impl DocumentSession {
     }
 
     /// Merge external parameters (overwrite keys) and re-evaluate.
+    /// Keys outside the `:root` direct-literal whitelist are ignored (evaluation warnings).
     pub fn patch_params(&mut self, patch: HashMap<String, Value>) -> Result<UpdateResult> {
         let patch = normalize_param_map(patch);
         let mut changed: Vec<String> = patch.keys().cloned().collect();
@@ -130,6 +135,8 @@ impl DocumentSession {
     pub fn reload(&mut self, input: &str) -> Result<UpdateResult> {
         self.doc = parse_xml(input)?;
         self.source = input.to_string();
+        let (kept, _) = filter_external_params(&self.doc, std::mem::take(&mut self.external));
+        self.external = kept;
         self.last = None;
         self.evaluate_internal(Vec::new(), true)
     }
@@ -139,7 +146,8 @@ impl DocumentSession {
         self.evaluate_internal(Vec::new(), false)
     }
 
-    /// Custom properties declared in class rules (and root inline style if present).
+    /// Custom properties declared in `:root` / class rules (and root inline style if present).
+    /// `external == true` only for direct `:root` literals (the host-overridable set).
     pub fn declared_params(&self) -> Vec<ParamDesc> {
         let mut map: IndexMap<String, ParamDesc> = IndexMap::new();
         for (class, props) in &self.doc.class_rules {
@@ -147,13 +155,19 @@ impl DocumentSession {
                 let Some(name) = css_name.strip_prefix("--") else {
                     continue;
                 };
+                let external = class == ":root" && is_direct_param_value(raw);
                 let entry = map.entry(name.to_string()).or_insert_with(|| ParamDesc {
                     name: name.to_string(),
                     default: Some(Value::parse_literal(raw)),
                     sources: Vec::new(),
+                    external: false,
                 });
                 if !entry.sources.iter().any(|s| s == class) {
                     entry.sources.push(class.clone());
+                }
+                if external {
+                    entry.external = true;
+                    entry.default = Some(Value::parse_literal(raw));
                 }
             }
         }
@@ -163,10 +177,12 @@ impl DocumentSession {
                 if let Some((name, value)) = decl.split_once(':') {
                     let name = name.trim();
                     if let Some(prop) = name.strip_prefix("--") {
+                        let raw = value.trim();
                         map.entry(prop.to_string()).or_insert_with(|| ParamDesc {
                             name: prop.to_string(),
-                            default: Some(Value::parse_literal(value.trim())),
-                            sources: vec![":root".into()],
+                            default: Some(Value::parse_literal(raw)),
+                            sources: vec!["svg".into()],
+                            external: false,
                         });
                     }
                 }
@@ -187,6 +203,9 @@ impl DocumentSession {
                 model: self.model.clone(),
             },
         )?;
+        // Keep only whitelist keys in the session snapshot (rejected keys already warned).
+        let (kept, _) = filter_external_params(&self.doc, std::mem::take(&mut self.external));
+        self.external = kept;
 
         let changes = if force_all_added || self.last.is_none() {
             all_added(&result.instructions)

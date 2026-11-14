@@ -18,7 +18,10 @@ pub use eval::{evaluate_document, EvalOptions};
 pub use instruction::{
     BoolOpKind, EvaluationResult, GeometryInstruction, ModelDesc, ModelUse, PrimitiveKind,
 };
-pub use params::{ParamScope, Value};
+pub use params::{
+    externalizable_root_names, externalizable_root_params, filter_external_params,
+    is_direct_param_value, ParamScope, Value,
+};
 pub use parser::{parse_xml, Document};
 pub use session::{update_to_json, DocumentSession, ParamDesc, UpdateResult};
 
@@ -85,6 +88,34 @@ mod tests {
     }
 
     #[test]
+    fn root_custom_props_inherit() {
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <style>
+            :root { --H: 100; }
+            .box { --W: 20; }
+          </style>
+          <defs>
+            <g id="g" class="box">
+              <s3dx:box length="1" width="1" height="1"
+                        lengthVec="1 0 0" widthVec="0 1 0">
+                <s3dx:exp length="var(--W)" width="var(--W)" height="var(--H)"/>
+              </s3dx:box>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#g"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        let json = to_json(&result).unwrap();
+        assert!(json.contains("\"height\": 100") || json.contains("\"height\":100"));
+        assert!(json.contains("\"length\": 20") || json.contains("\"length\":20"));
+    }
+
+    #[test]
     fn exp_override_and_condition() {
         let svg = r##"
         <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
@@ -95,14 +126,14 @@ mod tests {
               <s3dx:sphere radius="60" center="0 0 0">
                 <s3dx:exp radius="var(--R)"/>
               </s3dx:sphere>
-              <g if="var(--R) = 50">
+              <s3dx:if test="var(--R) = 50">
                 <s3dx:box length="1" width="1" height="1"
                           lengthVec="1 0 0" widthVec="0 1 0"/>
-              </g>
-              <g if="var(--R) &lt; 50">
+              </s3dx:if>
+              <s3dx:if test="var(--R) &lt; 50">
                 <s3dx:box length="9" width="9" height="9"
                           lengthVec="1 0 0" widthVec="0 1 0"/>
-              </g>
+              </s3dx:if>
             </g>
           </defs>
           <s3dx:model id="m" mode="solid" active="true">

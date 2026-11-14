@@ -77,7 +77,8 @@ fn index_ids(el: &Element, path: &mut Vec<usize>, index: &mut IndexMap<String, V
     }
 }
 
-/// Simplified CSS subset: `.classname { prop: value; }` (custom props + presentation).
+/// Simplified CSS subset: `:root` and `.classname` rules (custom props + presentation).
+/// `:root` is stored under the sentinel key `":root"` and applied to the document root scope.
 fn collect_class_rules(root: &Node<'_, '_>) -> IndexMap<String, IndexMap<String, String>> {
     let mut rules = IndexMap::new();
     collect_style_recursive(root, &mut rules);
@@ -139,19 +140,27 @@ fn parse_style_block(text: &str, rules: &mut IndexMap<String, IndexMap<String, S
         let body = &rest[..close];
         rest = &rest[close + 1..];
 
-        // only class selectors
         for sel in selector.split(',') {
             let sel = sel.trim();
-            if let Some(class) = sel.strip_prefix('.') {
+            let key = if sel == ":root" {
+                Some(":root".to_string())
+            } else if let Some(class) = sel.strip_prefix('.') {
                 if class
                     .chars()
                     .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
                 {
-                    let props = parse_style_decls(body);
-                    let entry = rules.entry(class.to_string()).or_default();
-                    for (k, v) in props {
-                        entry.insert(k, v);
-                    }
+                    Some(class.to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some(key) = key {
+                let props = parse_style_decls(body);
+                let entry = rules.entry(key).or_default();
+                for (k, v) in props {
+                    entry.insert(k, v);
                 }
             }
         }
@@ -188,13 +197,20 @@ mod tests {
         let doc = parse_xml(
             r##"<svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
                  xmlns:s3dx="urn:s3dx:draft:0.1">
-               <style>.tanks { --D: 200; --R: 50; }</style>
+               <style>
+                 :root { --H: 100; }
+                 .tanks { --D: 200; --R: 50; }
+               </style>
                <s3dx:box length="1" width="2" height="3"
                          s3dx:transform="matrix(1 0 0 0 1 0 0 0 1 10 0 0)"/>
              </svg>"##,
         )
         .unwrap();
         assert!(doc.svg3d);
+        assert_eq!(
+            doc.class_rules.get(":root").unwrap().get("--H").unwrap(),
+            "100"
+        );
         assert_eq!(
             doc.class_rules.get("tanks").unwrap().get("--D").unwrap(),
             "200"

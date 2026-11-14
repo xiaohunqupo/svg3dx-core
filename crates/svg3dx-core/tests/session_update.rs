@@ -8,7 +8,10 @@ fn sample_svg(loop_end: &str) -> String {
     format!(
         r##"<svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
              xmlns:s3dx="urn:s3dx:draft:0.1">
-          <style>.tanks {{ --D: 200; --R: 50; }}</style>
+          <style>
+            :root {{ --D: 200; }}
+            .tanks {{ --R: 50; }}
+          </style>
           <defs>
             <g id="group-tanks" class="tanks">
               <s3dx:cylinder diameter="60" bottomCenterPt="0 0 0" topCenterPt="0 0 100">
@@ -141,9 +144,9 @@ fn loop_range_shrink_via_external_not_needed_but_transform_diff_works() {
     // use two evaluates with identical doc — compare box transforms after loop values.
     let svg = r##"<svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
              xmlns:s3dx="urn:s3dx:draft:0.1">
-          <style>.p { --S: 50; }</style>
+          <style>:root { --S: 50; }</style>
           <defs>
-            <g id="pillars" class="p">
+            <g id="pillars">
               <s3dx:loop-range start="0" end="2" step="1">
                 <s3dx:box length="1" width="1" height="1"
                           lengthVec="1 0 0" widthVec="0 1 0"
@@ -191,8 +194,77 @@ fn loop_range_shrink_via_external_not_needed_but_transform_diff_works() {
 fn declared_params_from_class_rules() {
     let (session, _) = DocumentSession::open(&sample_svg("2")).unwrap();
     let decls = session.declared_params();
-    assert!(decls.iter().any(|p| p.name == "D"));
-    assert!(decls.iter().any(|p| p.name == "R"));
+    let d = decls.iter().find(|p| p.name == "D").expect("D");
+    assert!(d.external, "D is a direct :root literal");
+    let r = decls.iter().find(|p| p.name == "R").expect("R");
+    assert!(!r.external, "R is class-only and not externalizable");
+}
+
+#[test]
+fn external_rejects_non_root_and_derived() {
+    let svg = r##"<svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <style>
+            :root { --H: 100; --D: calc(var(--H) - 20); }
+            .tanks { --R: 50; }
+          </style>
+          <defs>
+            <g id="g" class="tanks">
+              <s3dx:sphere radius="1" center="0 0 0">
+                <s3dx:exp radius="var(--R)"/>
+              </s3dx:sphere>
+              <s3dx:box length="1" width="1" height="1"
+                        lengthVec="1 0 0" widthVec="0 1 0">
+                <s3dx:exp height="var(--H)"/>
+              </s3dx:box>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true"><s3dx:use href="#g"/></s3dx:model>
+        </svg>"##;
+    let (mut session, _) = DocumentSession::open(svg).unwrap();
+    let mut patch = HashMap::new();
+    patch.insert("H".into(), Value::Number(80.0));
+    patch.insert("R".into(), Value::Number(9.0));
+    patch.insert("D".into(), Value::Number(1.0));
+    let update = session.patch_params(patch).unwrap();
+    assert!(session.params().contains_key("H"));
+    assert!(!session.params().contains_key("R"));
+    assert!(!session.params().contains_key("D"));
+    assert!(update
+        .result
+        .warnings
+        .iter()
+        .any(|w| w.contains("external param 'R'")));
+    assert!(update
+        .result
+        .warnings
+        .iter()
+        .any(|w| w.contains("external param 'D'")));
+    let json = svg3dx_core::to_json(&update.result).unwrap();
+    assert!(json.contains("\"height\": 80") || json.contains("\"height\":80"));
+    assert!(json.contains("\"radius\": 50") || json.contains("\"radius\":50"));
+}
+
+#[test]
+fn declared_params_include_root_rule() {
+    let svg = r##"<svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <style>:root { --H: 100; } .tanks { --D: 200; }</style>
+          <defs>
+            <g id="g" class="tanks">
+              <s3dx:box length="1" width="1" height="1"
+                        lengthVec="1 0 0" widthVec="0 1 0">
+                <s3dx:exp height="var(--H)"/>
+              </s3dx:box>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true"><s3dx:use href="#g"/></s3dx:model>
+        </svg>"##;
+    let (session, update) = DocumentSession::open(svg).unwrap();
+    let decls = session.declared_params();
+    let h = decls.iter().find(|p| p.name == "H").expect("H from :root");
+    assert!(h.sources.iter().any(|s| s == ":root"));
+    assert!(update.result.warnings.is_empty(), "{:?}", update.result.warnings);
 }
 
 #[test]

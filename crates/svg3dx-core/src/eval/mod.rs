@@ -39,7 +39,13 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
 
     let mut warnings = Vec::new();
     let mut scope = ParamScope::new();
-    scope.set_external(opts.external);
+    let (external, rejected) = crate::params::filter_external_params(doc, opts.external);
+    for key in rejected {
+        warnings.push(format!(
+            "external param '{key}' ignored: only direct :root literals may be passed externally"
+        ));
+    }
+    scope.set_external(external);
 
     let mut class_map = HashMap::new();
     for (class, props) in &doc.class_rules {
@@ -52,12 +58,13 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
     scope.set_class_rules(class_map);
 
     let models = collect_models(doc, &mut scope, &mut warnings, opts.model.as_deref());
-    let reachable = reachable_group_ids(&models);
+    // Only groups referenced by the active model(s) are evaluated / emitted.
+    let reachable = reachable_group_ids(models.iter().filter(|m| m.active));
 
     let mut group_cache: HashMap<String, Vec<GeometryInstruction>> = HashMap::new();
     let mut visiting = HashSet::new();
 
-    push_element_scope(&mut scope, &doc.root);
+    push_root_scope(&mut scope, &doc.root);
 
     for el in doc.root.child_elements() {
         if el.is_svg("defs") {
@@ -88,7 +95,9 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
 
     let mut instructions = Vec::new();
     let mut emitted = HashSet::new();
-    for model in &models {
+    // Emit unique groups used by the active model (library). Host applies each
+    // `<s3dx:use>` transform when composing the view.
+    for model in models.iter().filter(|m| m.active) {
         for u in &model.uses {
             if emitted.insert(u.group_id.clone()) {
                 if let Some(geom) = group_cache.get(&u.group_id) {
@@ -186,7 +195,9 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
     })
 }
 
-fn reachable_group_ids(models: &[ModelDesc]) -> HashSet<String> {
+fn reachable_group_ids<'a>(
+    models: impl IntoIterator<Item = &'a ModelDesc>,
+) -> HashSet<String> {
     let mut set = HashSet::new();
     for m in models {
         for u in &m.uses {
@@ -251,6 +262,15 @@ fn collect_models(
         }
     }
     models
+}
+
+fn push_root_scope(scope: &mut ParamScope, el: &Element) {
+    // `:root { ... }` applies to the document root (same cascade level as root class rules;
+    // root inline `style` still wins via lookup order: inline → classes).
+    let mut classes = vec![":root".to_string()];
+    classes.extend(el.classes());
+    let inline = parse_inline_styles(el.attr("style").unwrap_or(""));
+    scope.push_node(classes, inline);
 }
 
 fn push_element_scope(scope: &mut ParamScope, el: &Element) {
@@ -321,11 +341,6 @@ fn eval_group(
 ) -> Vec<GeometryInstruction> {
     push_element_scope(scope, el);
 
-    if !condition::should_include(el, scope, warnings) {
-        scope.pop_node();
-        return Vec::new();
-    }
-
     let local_xf = parse_transform_attr(el, scope, warnings);
     let xf = local_xf.then(parent_xf);
 
@@ -360,7 +375,7 @@ fn eval_node(
 ) -> Vec<GeometryInstruction> {
     match el.ns {
         Namespace::Svg if el.name == "g" => {
-            // Nested <g>: transform/conditions apply; children flatten into parent list.
+            // Nested <g>: grouping / param scope / transform; children flatten into parent list.
             // Path uses id or g:n so descendants get stable node_ids.
             let mut child_path = if let Some(id) = el.id() {
                 path.child_prefix(id)
@@ -397,6 +412,9 @@ fn eval_s3dx(
     group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
     visiting: &mut HashSet<String>,
 ) -> Vec<GeometryInstruction> {
+    if matches!(el.name.as_str(), "if" | "if-not") {
+        return eval_condition(el, doc, scope, parent_xf, path, warnings, group_cache, visiting);
+    }
     if el.name.starts_with("loop-") {
         return eval_loop(el, doc, scope, parent_xf, path, warnings, group_cache, visiting);
     }
@@ -410,6 +428,49 @@ fn eval_s3dx(
         return Vec::new();
     }
     eval_primitive(el, scope, parent_xf, path, warnings)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn eval_condition(
+    el: &Element,
+    doc: &Document,
+    scope: &mut ParamScope,
+    parent_xf: Mat4x3,
+    path: &mut PathCtx,
+    warnings: &mut Vec<String>,
+    group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
+    visiting: &mut HashSet<String>,
+) -> Vec<GeometryInstruction> {
+    push_element_scope(scope, el);
+
+    if !condition::should_include_branch(el, scope, warnings) {
+        scope.pop_node();
+        return Vec::new();
+    }
+
+    let local_xf = parse_transform_attr(el, scope, warnings);
+    let xf = local_xf.then(parent_xf);
+    let mut child_path = {
+        let id = path.next(el.name.as_str());
+        path.under(&id)
+    };
+
+    let mut out = Vec::new();
+    for child in el.child_elements() {
+        out.extend(eval_node(
+            child,
+            doc,
+            scope,
+            xf,
+            &mut child_path,
+            warnings,
+            group_cache,
+            visiting,
+        ));
+    }
+
+    scope.pop_node();
+    out
 }
 
 fn inject_loop_vars(scope: &mut ParamScope, index: usize, value: Value) {
