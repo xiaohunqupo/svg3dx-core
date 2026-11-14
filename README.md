@@ -38,10 +38,12 @@ svg3dx-core/
 ├── crates/
 │   ├── svg3dx-core/       # Parse and evaluate
 │   ├── svg3dx-ffi-wasm/   # wasm-bindgen
-│   └── svg3dx-ffi-c/      # C ABI → svg3dx_core.dll
-├── cpp/                   # Headers + dump_json
+│   └── svg3dx-ffi-c/      # C ABI → svg3dx_core.dll (+ cbindgen.toml)
+├── cpp/                   # Generated svg3dx.h + dump_json
 ├── pkg/                   # wasm-pack output (after build)
-├── scripts/build-release.ps1
+├── scripts/
+│   ├── build-release.ps1
+│   └── generate-c-header.ps1
 └── docs/
 ```
 
@@ -51,11 +53,14 @@ svg3dx-core/
 .\scripts\build-release.ps1
 ```
 
+This runs tests → C DLL → **cbindgen → `cpp/include/svg3dx.h`** → CMake `dump_json` → wasm-pack → `pkg/`.
+
 Or manually:
 
 ```bash
 cargo test -p svg3dx-core
 cargo build -p svg3dx-ffi-c --release
+# Header: .\scripts\generate-c-header.ps1   or  ./scripts/generate-c-header.sh
 wasm-pack build crates/svg3dx-ffi-wasm --target bundler --out-dir pkg --out-name svg3dx_ffi_wasm
 cmake -S cpp -B cpp/build && cmake --build cpp/build
 ```
@@ -64,6 +69,17 @@ cmake -S cpp -B cpp/build && cmake --build cpp/build
 .\cpp\build\Debug\dump_json.exe ..\svg3dx\samples\draft-0.1-example.svg3dx `
   --dll .\target\release\svg3dx_core.dll
 ```
+
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) on `main` / PR:
+
+1. Checkout sibling `svg3dx` (samples for integration tests)
+2. `cargo test` + release C ABI build
+3. `./scripts/generate-c-header.sh --check` (header drift)
+4. CMake `dump_json` smoke against the official sample
+5. `wasm-pack` → `pkg/`
+6. Upload `pkg/`, `svg3dx.h`, `.so`, `dump_json`
 
 ## Multi-repo layout
 

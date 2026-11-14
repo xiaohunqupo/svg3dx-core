@@ -38,10 +38,12 @@ svg3dx-core/
 ├── crates/
 │   ├── svg3dx-core/       # 解析与求值
 │   ├── svg3dx-ffi-wasm/   # wasm-bindgen
-│   └── svg3dx-ffi-c/      # C ABI → svg3dx_core.dll
-├── cpp/                   # 头文件 + dump_json
+│   └── svg3dx-ffi-c/      # C ABI → svg3dx_core.dll（含 cbindgen.toml）
+├── cpp/                   # 自动生成的 svg3dx.h + dump_json
 ├── pkg/                   # wasm-pack 产出（构建后）
-├── scripts/build-release.ps1
+├── scripts/
+│   ├── build-release.ps1
+│   └── generate-c-header.ps1
 └── docs/
 ```
 
@@ -51,11 +53,14 @@ svg3dx-core/
 .\scripts\build-release.ps1
 ```
 
+流程：测试 → C DLL → **cbindgen 生成 `cpp/include/svg3dx.h`** → CMake `dump_json` → wasm-pack → `pkg/`。
+
 或手动：
 
 ```bash
 cargo test -p svg3dx-core
 cargo build -p svg3dx-ffi-c --release
+# 头文件: .\scripts\generate-c-header.ps1  或  ./scripts/generate-c-header.sh
 wasm-pack build crates/svg3dx-ffi-wasm --target bundler --out-dir pkg --out-name svg3dx_ffi_wasm
 cmake -S cpp -B cpp/build && cmake --build cpp/build
 ```
@@ -64,6 +69,17 @@ cmake -S cpp -B cpp/build && cmake --build cpp/build
 .\cpp\build\Debug\dump_json.exe ..\svg3dx\samples\draft-0.1-example.svg3dx `
   --dll .\target\release\svg3dx_core.dll
 ```
+
+## CI
+
+GitHub Actions（`.github/workflows/ci.yml`）在 `main` / PR 上：
+
+1. 检出并列仓 `svg3dx`（集成测试用 samples）
+2. `cargo test` + release C ABI
+3. `./scripts/generate-c-header.sh --check`（头文件漂移检查）
+4. CMake `dump_json` 对官方示例冒烟
+5. `wasm-pack` → `pkg/`
+6. 上传 `pkg/`、`svg3dx.h`、`.so`、`dump_json`
 
 ## 多仓关系
 

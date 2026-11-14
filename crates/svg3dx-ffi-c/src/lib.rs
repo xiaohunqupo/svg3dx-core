@@ -239,6 +239,7 @@ pub extern "C" fn svg3dx_session_open(
     }
 }
 
+/// Merge external params JSON object and re-evaluate. Returns UpdateResult JSON.
 #[no_mangle]
 pub extern "C" fn svg3dx_session_patch_params(
     session: *mut Svg3dxSession,
@@ -257,6 +258,7 @@ pub extern "C" fn svg3dx_session_patch_params(
     }
 }
 
+/// Replace external params JSON object and re-evaluate. Returns UpdateResult JSON.
 #[no_mangle]
 pub extern "C" fn svg3dx_session_set_params(
     session: *mut Svg3dxSession,
@@ -275,6 +277,7 @@ pub extern "C" fn svg3dx_session_set_params(
     }
 }
 
+/// Select active s3dx:model by id (NULL clears override). Returns UpdateResult JSON.
 #[no_mangle]
 pub extern "C" fn svg3dx_session_set_model(
     session: *mut Svg3dxSession,
@@ -293,6 +296,7 @@ pub extern "C" fn svg3dx_session_set_model(
     }
 }
 
+/// Re-parse document text and re-evaluate. Returns UpdateResult JSON.
 #[no_mangle]
 pub extern "C" fn svg3dx_session_reload(
     session: *mut Svg3dxSession,
@@ -312,6 +316,7 @@ pub extern "C" fn svg3dx_session_reload(
     }
 }
 
+/// Force re-evaluate with current params/model. Returns UpdateResult JSON.
 #[no_mangle]
 pub extern "C" fn svg3dx_session_evaluate(session: *mut Svg3dxSession) -> *mut Svg3dxResult {
     if session.is_null() {
@@ -323,6 +328,7 @@ pub extern "C" fn svg3dx_session_evaluate(session: *mut Svg3dxSession) -> *mut S
     }
 }
 
+/// Current session revision (increments on successful re-evaluate).
 #[no_mangle]
 pub extern "C" fn svg3dx_session_revision(session: *const Svg3dxSession) -> u64 {
     if session.is_null() {
@@ -331,6 +337,7 @@ pub extern "C" fn svg3dx_session_revision(session: *const Svg3dxSession) -> u64 
     unsafe { (*session).inner.revision() }
 }
 
+/// Free a session opened by `svg3dx_session_open`.
 #[no_mangle]
 pub extern "C" fn svg3dx_session_free(session: *mut Svg3dxSession) {
     if session.is_null() {
@@ -341,6 +348,7 @@ pub extern "C" fn svg3dx_session_free(session: *mut Svg3dxSession) {
     }
 }
 
+/// True if the result JSON is a successful EvaluationResult / UpdateResult.
 #[no_mangle]
 pub extern "C" fn svg3dx_result_ok(result: *const Svg3dxResult) -> bool {
     if result.is_null() {
@@ -349,6 +357,7 @@ pub extern "C" fn svg3dx_result_ok(result: *const Svg3dxResult) -> bool {
     unsafe { (*result).ok }
 }
 
+/// NUL-terminated JSON bytes (EvaluationResult, UpdateResult, or `{"error":"..."}`).
 #[no_mangle]
 pub extern "C" fn svg3dx_result_json(result: *const Svg3dxResult) -> *const c_char {
     if result.is_null() {
@@ -357,6 +366,7 @@ pub extern "C" fn svg3dx_result_json(result: *const Svg3dxResult) -> *const c_ch
     unsafe { (*result).json.as_ptr() }
 }
 
+/// Byte length of JSON without trailing NUL.
 #[no_mangle]
 pub extern "C" fn svg3dx_result_len(result: *const Svg3dxResult) -> usize {
     if result.is_null() {
@@ -365,6 +375,7 @@ pub extern "C" fn svg3dx_result_len(result: *const Svg3dxResult) -> usize {
     unsafe { (*result).json.as_bytes().len() }
 }
 
+/// Number of evaluation warnings associated with a successful result.
 #[no_mangle]
 pub extern "C" fn svg3dx_result_warning_count(result: *const Svg3dxResult) -> usize {
     if result.is_null() {
@@ -373,6 +384,7 @@ pub extern "C" fn svg3dx_result_warning_count(result: *const Svg3dxResult) -> us
     unsafe { (*result).warnings_len }
 }
 
+/// Free a result returned by parse / session APIs.
 #[no_mangle]
 pub extern "C" fn svg3dx_free_result(result: *mut Svg3dxResult) {
     if result.is_null() {

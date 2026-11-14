@@ -1,0 +1,104 @@
+# Build pipeline aligned with scripts/build-release.ps1:
+#   tests → C ABI → cbindgen check → dump_json → wasm-pack → artifacts
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: core-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: ${{ github.workspace }}/svg3dx-core/target
+  SVG3DX_ROOT: ${{ github.workspace }}/svg3dx
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: svg3dx-core
+
+    steps:
+      - name: Checkout svg3dx-core
+        uses: actions/checkout@v4
+        with:
+          path: svg3dx-core
+
+      - name: Checkout svg3dx (samples for integration tests)
+        uses: actions/checkout@v4
+        with:
+          repository: xiaohunqupo/svg3dx
+          path: svg3dx
+
+      - name: Setup Rust (native + wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            svg3dx-core/target/
+          key: ${{ runner.os }}-cargo-core-${{ hashFiles('svg3dx-core/Cargo.toml', 'svg3dx-core/crates/**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-core-
+
+      - name: Install wasm-pack + cbindgen
+        run: |
+          command -v wasm-pack >/dev/null 2>&1 || cargo install wasm-pack --locked
+          command -v cbindgen >/dev/null 2>&1 || cargo install cbindgen --locked
+        working-directory: ${{ github.workspace }}
+
+      - name: cargo test (svg3dx-core)
+        run: cargo test -p svg3dx-core
+
+      - name: cargo build C ABI (svg3dx-ffi-c)
+        run: cargo build -p svg3dx-ffi-c --release
+
+      - name: cbindgen header drift check
+        run: bash ./scripts/generate-c-header.sh --check
+
+      - name: Configure CMake (dump_json)
+        run: cmake -S cpp -B cpp/build
+
+      - name: Build dump_json
+        run: cmake --build cpp/build --config Release
+
+      - name: Smoke dump_json against sample
+        run: |
+          DLL="$CARGO_TARGET_DIR/release/libsvg3dx_core.so"
+          SAMPLE="$SVG3DX_ROOT/samples/draft-0.1-example.svg3dx"
+          test -f "$DLL"
+          test -f "$SAMPLE"
+          ./cpp/build/dump_json "$SAMPLE" --dll "$DLL" | head -c 200
+          echo
+
+      - name: wasm-pack → pkg/
+        run: |
+          wasm-pack build crates/svg3dx-ffi-wasm \
+            --target bundler \
+            --out-dir pkg \
+            --out-name svg3dx_ffi_wasm
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: svg3dx-core-artifacts
+          path: |
+            svg3dx-core/pkg
+            svg3dx-core/cpp/include/svg3dx.h
+            svg3dx-core/target/release/libsvg3dx_core.so
+            svg3dx-core/cpp/build/dump_json
+          if-no-files-found: error

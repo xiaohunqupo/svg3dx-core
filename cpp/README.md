@@ -4,6 +4,20 @@
 
 [`include/svg3dx.h`](include/svg3dx.h) — C ABI for `svg3dx_core.dll` / `libsvg3dx_core.so`.
 
+**Do not edit by hand.** Regenerate from `svg3dx-ffi-c` with cbindgen:
+
+```powershell
+.\scripts\generate-c-header.ps1
+.\scripts\generate-c-header.ps1 -Check   # CI / drift check
+```
+
+```bash
+./scripts/generate-c-header.sh
+./scripts/generate-c-header.sh --check
+```
+
+`build-release.ps1` and GitHub Actions CI run generation / drift check before building `dump_json`.
+
 ## dump_json
 
 Command-line host: read an `.svg` / `.svg3dx` → print geometry-instruction JSON.

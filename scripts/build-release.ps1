@@ -1,4 +1,5 @@
-# Build svg3dx-core release artifacts: tests, C ABI DLL, dump_json, WASM pkg.
+# Build svg3dx-core release artifacts:
+#   tests → C ABI DLL → cbindgen header → dump_json → WASM pkg
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
@@ -18,6 +19,10 @@ $dll = Join-Path $Root "target\release\svg3dx_core.dll"
 if (-not (Test-Path $dll)) {
   Write-Error "DLL not found: $dll"
 }
+
+Write-Host "==> generate C header (cbindgen)"
+& (Join-Path $PSScriptRoot "generate-c-header.ps1")
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "==> build dump_json (CMake)"
 $buildDir = Join-Path $Root "cpp\build"
@@ -39,9 +44,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host ""
 Write-Host "Done."
 Write-Host "  DLL:  $dll"
-Write-Host "  CLI:  cpp\build\Debug\dump_json.exe"
+Write-Host "  HDR:  cpp\include\svg3dx.h"
+Write-Host "  CLI:  cpp\build\Release\dump_json.exe  (or Debug\)"
 Write-Host "  WASM: pkg\"
 Write-Host ""
 Write-Host "Try:"
-Write-Host "  .\cpp\build\Debug\dump_json.exe ..\svg3dx\samples\draft-0.1-example.svg3dx --dll .\target\release\svg3dx_core.dll"
+Write-Host "  .\cpp\build\Release\dump_json.exe ..\svg3dx\samples\draft-0.1-example.svg3dx --dll .\target\release\svg3dx_core.dll"
 Write-Host "  (viewer/studio are separate repos: ../svg3dx-viewer, ../svg3dx-studio)"

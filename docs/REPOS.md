@@ -7,7 +7,11 @@
 | `f:\svg3dx-viewer` | **查看器组件**（可嵌入） | [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer) |
 | `f:\svg3dx-studio` | **svg3dx 编辑器** | [svg3dx-studio](https://github.com/xiaohunqupo/svg3dx-studio) |
 
-构建顺序：`svg3dx-core`（wasm-pack → `pkg/`）→ `svg3dx-viewer` → `svg3dx-studio`。
+构建顺序：`svg3dx-core`（`build-release.ps1`：DLL + cbindgen 头文件 + wasm-pack → `pkg/`）→ `svg3dx-viewer` → `svg3dx-studio`。
+
+头文件：`cpp/include/svg3dx.h` 由 `scripts/generate-c-header.ps1` / `.sh`（cbindgen）从 `svg3dx-ffi-c` 生成；可用 `-Check` / `--check` 检测漂移。
+
+CI：各仓 `.github/workflows/ci.yml`（core 含测试 / ABI / 头文件检查 / dump_json / wasm-pack）。
 
 环境变量：
 
