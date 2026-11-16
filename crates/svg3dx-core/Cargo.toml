@@ -6,6 +6,11 @@ license.workspace = true
 authors.workspace = true
 description = "Kernel-agnostic parser and evaluator for the svg3dx format"
 readme = "README.md"
+repository = "https://github.com/xiaohunqupo/svg3dx-core"
+homepage = "https://github.com/xiaohunqupo/svg3dx-core"
+documentation = "https://docs.rs/svg3dx-core"
+keywords = ["svg3dx", "svg", "3d", "parser"]
+categories = ["parsing", "graphics"]
 
 [dependencies]
 roxmltree = { workspace = true }

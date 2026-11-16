@@ -1,8 +1,10 @@
 # svg3dx-core
 
-Kernel-agnostic parser and evaluator for the [svg3dx](https://github.com/) format.
+Kernel-agnostic parser and evaluator for the [svg3dx](https://github.com/xiaohunqupo/svg3dx) format.
 
 Format specification and samples live in the separate **svg3dx** format repository (`SVG3DX_ROOT`, default sibling `../svg3dx`). This crate does not vendor them.
+
+Related: [svg3dx-core](https://github.com/xiaohunqupo/svg3dx-core) · [svg3dx-viewer](https://github.com/xiaohunqupo/svg3dx-viewer) · [svg3dx-studio](https://github.com/xiaohunqupo/svg3dx-studio) · [docs.rs](https://docs.rs/svg3dx-core)
 
 ```rust
 use svg3dx_core::{parse_and_evaluate, DocumentSession, Value};
