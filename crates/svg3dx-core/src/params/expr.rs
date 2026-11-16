@@ -28,8 +28,17 @@ pub fn resolve_attr(raw: &str, scope: &ParamScope) -> Result<Value, Warning> {
     if !s.contains("var(") && !s.contains("calc(") {
         return Ok(Value::parse_literal(s));
     }
-    // Whole-attribute expression.
+    // Whole-attribute expression — but `var(--L) 0 0` is an embedded vector list.
     if s.starts_with("var(") || s.starts_with("calc(") {
+        let prefix = if s.starts_with("calc(") { "calc(" } else { "var(" };
+        let chars: Vec<char> = s.chars().collect();
+        if let Ok((_, next)) = take_paren_expr(&chars, 0, prefix) {
+            let rest: String = chars[next..].iter().collect();
+            if !rest.trim().is_empty() {
+                let expanded = expand_embedded(s, scope)?;
+                return Ok(Value::parse_literal(&expanded));
+            }
+        }
         return evaluate(s, scope);
     }
     // Embedded refs (e.g. matrix(... var(--loop-value) ...) / calc inside lists).
@@ -473,6 +482,20 @@ mod tests {
         assert_eq!(
             evaluate("calc(var(--R) / 3)", &scope).unwrap(),
             Value::Number(50.0 / 3.0)
+        );
+    }
+
+    #[test]
+    fn embedded_var_at_start_of_vector() {
+        let mut scope = ParamScope::new();
+        scope.set_local("len", Value::Number(200.0));
+        assert_eq!(
+            resolve_attr("var(--len) 0 0", &scope).unwrap(),
+            Value::Vector(vec![200.0, 0.0, 0.0])
+        );
+        assert_eq!(
+            resolve_attr("0 var(--len) 0", &scope).unwrap(),
+            Value::Vector(vec![0.0, 200.0, 0.0])
         );
     }
 

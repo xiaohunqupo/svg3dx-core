@@ -1,0 +1,6 @@
+[package]
+name = "dump_sweep"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+svg3dx-core = { path = "../crates/svg3dx-core" }

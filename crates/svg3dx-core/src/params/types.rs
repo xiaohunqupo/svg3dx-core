@@ -10,9 +10,9 @@ pub enum Value {
     Vector(Vec<f64>),
     Bool(bool),
     String(String),
-    /// Nested object (e.g. `<s3dx:profile>` attrs after evaluation).
+    /// Nested object (e.g. `<s3dx:section>` after evaluation).
     Map(IndexMap<String, Value>),
-    /// Nested list (e.g. multiple loft profiles).
+    /// Nested list (e.g. multiple loft sections).
     List(Vec<Value>),
 }
 

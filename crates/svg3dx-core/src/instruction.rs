@@ -141,6 +141,9 @@ pub enum PrimitiveKind {
     Prism,
     #[serde(rename = "sector-cylinder")]
     SectorCylinder,
+    Line,
+    Arc,
+    Path,
     Extrude,
     Revolve,
     Loft,
@@ -165,6 +168,9 @@ impl PrimitiveKind {
             "prism" => Self::Prism,
             // Spec name is sector-cylinder; cutcylinder kept as a read alias.
             "sector-cylinder" | "cutcylinder" => Self::SectorCylinder,
+            "line" => Self::Line,
+            "arc" => Self::Arc,
+            "path" => Self::Path,
             // Spec: polylinestretch is a compatibility alias for extrude.
             "extrude" | "polylinestretch" => Self::Extrude,
             "revolve" => Self::Revolve,
@@ -188,6 +194,9 @@ impl PrimitiveKind {
             Self::Pyramid => "pyramid",
             Self::Prism => "prism",
             Self::SectorCylinder => "sector-cylinder",
+            Self::Line => "line",
+            Self::Arc => "arc",
+            Self::Path => "path",
             Self::Extrude => "extrude",
             Self::Revolve => "revolve",
             Self::Loft => "loft",

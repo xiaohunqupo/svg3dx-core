@@ -41,11 +41,39 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
         ],
         PrimitiveKind::Prism => &["points", "height", "normal"],
         PrimitiveKind::SectorCylinder => &["diameter", "bottomCenterPt", "topCenterPt", "angle"],
-        PrimitiveKind::Extrude => &["dir", "length", "profile"],
-        PrimitiveKind::Revolve => &["axisOrigin", "axisDir", "angle", "profile"],
-        PrimitiveKind::Loft => &["solid", "ruled", "profiles"],
-        PrimitiveKind::Sweep => &["orient", "refDir", "solid", "path", "profile"],
-        PrimitiveKind::Pipe => &["radius", "innerRadius", "path"],
+        PrimitiveKind::Line => &["from", "to"],
+        PrimitiveKind::Arc => &[
+            "center",
+            "normal",
+            "radius",
+            "xDir",
+            "startAngle",
+            "angle",
+            "from",
+            "to",
+        ],
+        PrimitiveKind::Path => &["points", "segments"],
+        PrimitiveKind::Extrude => &["origin", "xDir", "normal", "dir", "length", "section"],
+        PrimitiveKind::Revolve => &[
+            "origin",
+            "xDir",
+            "normal",
+            "axisOrigin",
+            "axisDir",
+            "angle",
+            "section",
+        ],
+        PrimitiveKind::Loft => &["solid", "blend", "sections"],
+        PrimitiveKind::Sweep => &[
+            "orient",
+            "refDir",
+            "solid",
+            "corner",
+            "cornerRadius",
+            "path",
+            "section",
+        ],
+        PrimitiveKind::Pipe => &["radius", "innerRadius", "corner", "cornerRadius", "path"],
         PrimitiveKind::Mesh => &[
             "mode",
             "position",
@@ -81,14 +109,18 @@ pub fn filter_params(
     let known = known_attrs(kind);
     let mut out = IndexMap::new();
     for (k, v) in attrs {
-        if known.iter().any(|n| *n == k) || k == "kind_name" {
-            out.insert(k, v);
-        } else if !is_meta_attr(&k) {
+        if is_meta_attr(&k) {
+            continue;
+        }
+        if !(known.iter().any(|n| *n == k) || k == "kind_name") {
+            // Keep unknown attrs so newer documents still work with older
+            // known_attrs lists (viewer may understand them); only warn.
             warnings.push(format!(
-                "unknown attribute '{k}' on s3dx:{} — ignored",
+                "unknown attribute '{k}' on s3dx:{} — kept",
                 kind.as_str()
             ));
         }
+        out.insert(k, v);
     }
     out
 }

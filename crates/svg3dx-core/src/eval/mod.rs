@@ -424,7 +424,7 @@ fn eval_s3dx(
     if el.name == "use" {
         return eval_use(el, doc, scope, parent_xf, path, warnings, group_cache, visiting);
     }
-    if matches!(el.name.as_str(), "exp" | "model" | "profile" | "path") {
+    if matches!(el.name.as_str(), "exp" | "model" | "section") {
         return Vec::new();
     }
     eval_primitive(el, scope, parent_xf, path, warnings)
@@ -779,9 +779,92 @@ fn eval_child_attrs(
                 map.insert(name.clone(), v);
             }
             Err(w) => {
-                warnings.push(format!("s3dx:{} @{name}: {}", child.name, w.message));
+                warnings.push(format!("{} @{name}: {}", child.name, w.message));
             }
         }
+    }
+    map
+}
+
+/// Evaluate `<s3dx:section>`: pose attrs + SVG shape children (`tag` + attrs).
+fn eval_section(
+    el: &Element,
+    scope: &ParamScope,
+    warnings: &mut Vec<String>,
+) -> IndexMap<String, Value> {
+    let mut map = eval_child_attrs(el, scope, warnings);
+    let mut shapes = Vec::new();
+    for child in el.child_elements() {
+        let ok = match child.ns {
+            Namespace::Svg => matches!(
+                child.name.as_str(),
+                "path" | "circle" | "ellipse" | "polygon" | "polyline" | "rect"
+            ),
+            _ => false,
+        };
+        if !ok {
+            warnings.push(format!(
+                "s3dx:section ignores unexpected <{}>",
+                if child.ns == Namespace::S3dx {
+                    format!("s3dx:{}", child.name)
+                } else {
+                    child.name.clone()
+                }
+            ));
+            continue;
+        }
+        let mut shape = eval_child_attrs(child, scope, warnings);
+        shape.insert("tag".into(), Value::String(child.name.clone()));
+        shapes.push(Value::Map(shape));
+    }
+    if shapes.is_empty() {
+        warnings.push(
+            "s3dx:section requires at least one SVG shape child (path/circle/polygon/rect/…)"
+                .into(),
+        );
+    }
+    map.insert("shapes".into(), Value::List(shapes));
+    map
+}
+
+/// Evaluate `<s3dx:path>`: `points` and/or `line`/`arc` segment children.
+fn eval_path(
+    el: &Element,
+    scope: &ParamScope,
+    warnings: &mut Vec<String>,
+) -> IndexMap<String, Value> {
+    let mut map = eval_child_attrs(el, scope, warnings);
+    let mut segments = Vec::new();
+    for child in el.child_elements() {
+        if child.is_s3dx("line") || child.is_s3dx("arc") {
+            let mut seg = eval_child_attrs(child, scope, warnings);
+            seg.insert("tag".into(), Value::String(child.name.clone()));
+            segments.push(Value::Map(seg));
+        } else if child.is_s3dx("exp") {
+            continue;
+        } else {
+            warnings.push(format!(
+                "s3dx:path ignores unexpected <{}>",
+                if child.ns == Namespace::S3dx {
+                    format!("s3dx:{}", child.name)
+                } else {
+                    child.name.clone()
+                }
+            ));
+        }
+    }
+    if !segments.is_empty() {
+        if map.contains_key("points") {
+            warnings.push(
+                "s3dx:path has both points and line/arc children — using children".into(),
+            );
+            map.shift_remove("points");
+        }
+        map.insert("segments".into(), Value::List(segments));
+    } else if !map.contains_key("points") {
+        warnings.push(
+            "s3dx:path requires points attribute or <s3dx:line>/<s3dx:arc> children".into(),
+        );
     }
     map
 }
@@ -793,53 +876,65 @@ fn collect_construct_children(
     params: &mut IndexMap<String, Value>,
     warnings: &mut Vec<String>,
 ) {
-    let mut profiles = Vec::new();
+    let mut sections = Vec::new();
     let mut path_from_child = None;
 
     for child in el.child_elements() {
-        if child.is_s3dx("profile") {
-            profiles.push(Value::Map(eval_child_attrs(child, scope, warnings)));
+        if child.is_s3dx("section") {
+            sections.push(Value::Map(eval_section(child, scope, warnings)));
         } else if child.is_s3dx("path") {
-            path_from_child = Some(Value::Map(eval_child_attrs(child, scope, warnings)));
+            path_from_child = Some(Value::Map(eval_path(child, scope, warnings)));
         }
+    }
+
+    if kind == PrimitiveKind::Path {
+        // Standalone path: fold segment children into params.
+        let evaluated = eval_path(el, scope, warnings);
+        if evaluated.contains_key("segments") {
+            params.shift_remove("points");
+        }
+        for (k, v) in evaluated {
+            params.insert(k, v);
+        }
+        return;
     }
 
     match kind {
         PrimitiveKind::Extrude | PrimitiveKind::Revolve => {
-            if profiles.len() == 1 {
-                params.insert("profile".into(), profiles.remove(0));
-            } else if profiles.is_empty() {
+            if sections.len() == 1 {
+                params.insert("section".into(), sections.remove(0));
+            } else if sections.is_empty() {
                 warnings.push(format!(
-                    "s3dx:{} requires exactly one <s3dx:profile>",
+                    "s3dx:{} requires exactly one <s3dx:section>",
                     kind.as_str()
                 ));
             } else {
                 warnings.push(format!(
-                    "s3dx:{} expects exactly one <s3dx:profile>, got {}",
+                    "s3dx:{} expects exactly one <s3dx:section>, got {}",
                     kind.as_str(),
-                    profiles.len()
+                    sections.len()
                 ));
             }
         }
         PrimitiveKind::Loft => {
-            if profiles.len() >= 2 {
-                params.insert("profiles".into(), Value::List(profiles));
+            if sections.len() >= 2 {
+                params.insert("sections".into(), Value::List(sections));
             } else {
                 warnings.push(format!(
-                    "s3dx:loft requires at least two <s3dx:profile>, got {}",
-                    profiles.len()
+                    "s3dx:loft requires at least two <s3dx:section>, got {}",
+                    sections.len()
                 ));
             }
         }
         PrimitiveKind::Sweep => {
-            if profiles.len() == 1 {
-                params.insert("profile".into(), profiles.remove(0));
-            } else if profiles.is_empty() {
-                warnings.push("s3dx:sweep requires exactly one <s3dx:profile>".into());
+            if sections.len() == 1 {
+                params.insert("section".into(), sections.remove(0));
+            } else if sections.is_empty() {
+                warnings.push("s3dx:sweep requires exactly one <s3dx:section>".into());
             } else {
                 warnings.push(format!(
-                    "s3dx:sweep expects exactly one <s3dx:profile>, got {}",
-                    profiles.len()
+                    "s3dx:sweep expects exactly one <s3dx:section>, got {}",
+                    sections.len()
                 ));
             }
             if let Some(path) = path_from_child {
@@ -866,9 +961,9 @@ fn collect_construct_children(
             }
         }
         _ => {
-            if !profiles.is_empty() || path_from_child.is_some() {
+            if !sections.is_empty() || path_from_child.is_some() {
                 warnings.push(format!(
-                    "s3dx:{} ignores unexpected profile/path children",
+                    "s3dx:{} ignores unexpected section/path children",
                     kind.as_str()
                 ));
             }

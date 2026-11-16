@@ -238,15 +238,43 @@ mod tests {
     }
 
     #[test]
-    fn extrude_with_profile() {
+    fn path_with_line_arc_segments() {
         let svg = r##"
         <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
              xmlns:s3dx="urn:s3dx:draft:0.1">
           <defs>
             <g id="g">
-              <s3dx:extrude length="60" dir="0 0 1">
-                <s3dx:profile type="polygon"
-                              points="0 100 0  100 100 0  100 0 0  0 0 0"/>
+              <s3dx:path>
+                <s3dx:line from="0 0 0" to="200 0 0"/>
+                <s3dx:arc center="200 0 75" normal="1 0 0" radius="75"
+                          from="200 0 0" to="200 0 150"/>
+              </s3dx:path>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#g"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        let json = to_json(&result).unwrap();
+        assert!(json.contains("\"path\""));
+        assert!(json.contains("\"segments\""));
+        assert!(json.contains("\"line\""));
+        assert!(json.contains("\"arc\""));
+    }
+
+    #[test]
+    fn extrude_with_section() {
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <defs>
+            <g id="g">
+              <s3dx:extrude origin="0 0 0" normal="0 0 1" length="60">
+                <s3dx:section>
+                  <path d="M 0 100 L 100 100 L 100 0 L 0 0 Z"/>
+                </s3dx:section>
               </s3dx:extrude>
             </g>
           </defs>
@@ -258,7 +286,8 @@ mod tests {
         assert!(result.warnings.is_empty(), "{:?}", result.warnings);
         let json = to_json(&result).unwrap();
         assert!(json.contains("\"extrude\""));
-        assert!(json.contains("\"profile\""));
+        assert!(json.contains("\"section\""));
+        assert!(json.contains("\"shapes\""));
     }
 
     fn flatten<'a>(

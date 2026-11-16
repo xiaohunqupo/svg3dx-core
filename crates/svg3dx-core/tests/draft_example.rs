@@ -92,3 +92,67 @@ fn evaluate_draft_0_1_example() {
     assert!(json.contains("solid-view"));
     assert!(json.contains("s3dx") || json.contains("\"m\"") || json.contains("length"));
 }
+
+fn load_sample(name: &str) -> Option<String> {
+    let path = svg3dx_root().join("samples").join(name);
+    if !path.is_file() {
+        eprintln!("skip: sample not found at {}", path.display());
+        return None;
+    }
+    Some(std::fs::read_to_string(path).expect("read sample"))
+}
+
+#[test]
+fn evaluate_curve_and_construct_samples() {
+    let cases: &[(&str, &[PrimitiveKind])] = &[
+        ("draft-0.1-line.svg3dx", &[PrimitiveKind::Line]),
+        ("draft-0.1-arc.svg3dx", &[PrimitiveKind::Arc]),
+        ("draft-0.1-path.svg3dx", &[PrimitiveKind::Path]),
+        ("draft-0.1-curves.svg3dx", &[PrimitiveKind::Line, PrimitiveKind::Arc, PrimitiveKind::Path, PrimitiveKind::Pipe]),
+        ("draft-0.1-extrude.svg3dx", &[PrimitiveKind::Extrude]),
+        ("draft-0.1-revolve.svg3dx", &[PrimitiveKind::Revolve]),
+        ("draft-0.1-loft.svg3dx", &[PrimitiveKind::Loft]),
+        ("draft-0.1-sweep.svg3dx", &[PrimitiveKind::Sweep]),
+        ("draft-0.1-pipe.svg3dx", &[PrimitiveKind::Pipe]),
+    ];
+
+    let mut ran = 0;
+    for (name, kinds) in cases {
+        let Some(text) = load_sample(name) else {
+            continue;
+        };
+        ran += 1;
+        let result = parse_and_evaluate(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(
+            result.warnings.is_empty(),
+            "{name} warnings: {:?}",
+            result.warnings
+        );
+        let all: Vec<_> = result.instructions.iter().flat_map(|i| flatten(i)).collect();
+        for kind in *kinds {
+            let found = all.iter().any(|i| {
+                matches!(
+                    i,
+                    GeometryInstruction::Primitive { kind: k, .. } if k == kind
+                )
+            });
+            assert!(found, "{name}: expected primitive {kind:?}");
+        }
+        if matches!(
+            name,
+            &"draft-0.1-path.svg3dx"
+                | &"draft-0.1-curves.svg3dx"
+                | &"draft-0.1-sweep.svg3dx"
+                | &"draft-0.1-pipe.svg3dx"
+        ) {
+            let json = svg3dx_core::to_json(&result).unwrap();
+            assert!(
+                json.contains("\"segments\"") || json.contains("\"points\""),
+                "{name}: path should carry segments or points"
+            );
+        }
+    }
+    if ran == 0 {
+        eprintln!("skip: no official samples found (set SVG3DX_ROOT)");
+    }
+}
