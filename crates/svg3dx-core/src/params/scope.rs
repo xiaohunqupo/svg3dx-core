@@ -18,6 +18,8 @@ pub struct ParamScope {
 #[derive(Debug, Clone, Default)]
 struct ScopeNode {
     classes: Vec<String>,
+    /// Presentation attributes (`fill`, `--material` from `material=`, …); lowest on this node.
+    presentation: IndexMap<String, Value>,
     /// Inline `style` declarations with CSS property names.
     inline: IndexMap<String, Value>,
 }
@@ -38,8 +40,17 @@ impl ParamScope {
         self.class_rules = rules;
     }
 
-    pub fn push_node(&mut self, classes: Vec<String>, inline: IndexMap<String, Value>) {
-        self.chain.push(ScopeNode { classes, inline });
+    pub fn push_node(
+        &mut self,
+        classes: Vec<String>,
+        inline: IndexMap<String, Value>,
+        presentation: IndexMap<String, Value>,
+    ) {
+        self.chain.push(ScopeNode {
+            classes,
+            presentation,
+            inline,
+        });
     }
 
     pub fn pop_node(&mut self) {
@@ -94,6 +105,13 @@ impl ParamScope {
                     }
                 }
             }
+            if let Some(v) = node
+                .presentation
+                .get(&dashed)
+                .or_else(|| node.presentation.get(&key))
+            {
+                return Some(v.clone());
+            }
         }
 
         None
@@ -101,11 +119,15 @@ impl ParamScope {
 
     /// Effective CSS styles at the current scope (custom props + presentation).
     /// Custom / injected params use dashed-ident keys (`--D`, `--loop-value`).
+    /// Per node: presentation → class rules → inline (CSS beats presentation attrs).
     pub fn resolved_styles(&self) -> IndexMap<String, Value> {
         let mut out = IndexMap::new();
 
         // Cascade outer → inner so nearer declarations win.
         for node in &self.chain {
+            for (k, v) in &node.presentation {
+                out.insert(k.clone(), v.clone());
+            }
             for class in &node.classes {
                 if let Some(rule) = self.class_rules.get(class) {
                     for (k, v) in rule {

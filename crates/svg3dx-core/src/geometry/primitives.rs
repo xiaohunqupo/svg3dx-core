@@ -89,11 +89,19 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
     }
 }
 
-/// Attributes that are never geometry params (SVG / host / 3D transform).
+/// Attributes that are never geometry params (SVG / host / 3D transform / appearance).
 pub fn is_meta_attr(name: &str) -> bool {
     matches!(
         name,
-        "transform" | "s3dx:transform" | "id" | "class" | "style" | "href"
+        "transform"
+            | "s3dx:transform"
+            | "id"
+            | "class"
+            | "style"
+            | "href"
+            | "fill"
+            | "material"
+            | "opacity"
     ) || name.starts_with("s3dx:")
         || (name.starts_with('{') && name.contains('}'))
 }

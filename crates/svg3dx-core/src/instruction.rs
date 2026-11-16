@@ -9,8 +9,21 @@ use crate::params::types::Value;
 pub struct EvaluationResult {
     pub instructions: Vec<GeometryInstruction>,
     pub models: Vec<ModelDesc>,
+    /// Document-defined materials from `<s3dx:materials>` (built-ins are host-side).
+    #[serde(default)]
+    pub materials: Vec<MaterialDesc>,
     pub active_model: Option<String>,
     pub warnings: Vec<String>,
+}
+
+/// Custom material from `<s3dx:material>` (metallic-roughness, draft 0.1).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MaterialDesc {
+    pub id: String,
+    /// RGBA in sRGB, components typically ∈ [0,1].
+    pub color: [f64; 4],
+    pub metalness: f64,
+    pub roughness: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

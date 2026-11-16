@@ -16,7 +16,8 @@ pub use diff::{ChangeFields, NodeChange, NodeChangeKind};
 pub use error::{Error, Result, Warning};
 pub use eval::{evaluate_document, EvalOptions};
 pub use instruction::{
-    BoolOpKind, EvaluationResult, GeometryInstruction, ModelDesc, ModelUse, PrimitiveKind,
+    BoolOpKind, EvaluationResult, GeometryInstruction, MaterialDesc, ModelDesc, ModelUse,
+    PrimitiveKind,
 };
 pub use params::{
     externalizable_root_names, externalizable_root_params, filter_external_params,
@@ -288,6 +289,44 @@ mod tests {
         assert!(json.contains("\"extrude\""));
         assert!(json.contains("\"section\""));
         assert!(json.contains("\"shapes\""));
+    }
+
+    #[test]
+    fn materials_library_and_fill_styles() {
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <s3dx:materials>
+            <s3dx:material id="paint" color="0.2 0.4 0.8 1" metalness="0" roughness="0.4"/>
+          </s3dx:materials>
+          <defs>
+            <g id="g">
+              <s3dx:box length="1" width="1" height="1"
+                        lengthVec="1 0 0" widthVec="0 1 0"
+                        fill="0.5 0.5 0.5 1" material="url(#paint)"/>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#g"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        assert_eq!(result.materials.len(), 1);
+        assert_eq!(result.materials[0].id, "paint");
+        assert_eq!(result.materials[0].color, [0.2, 0.4, 0.8, 1.0]);
+        let prim = flatten(&result.instructions[0])
+            .find(|i| matches!(i, GeometryInstruction::Primitive { .. }))
+            .expect("primitive");
+        let styles = prim.styles();
+        assert!(styles.contains_key("fill"), "{styles:?}");
+        assert_eq!(
+            styles.get("--material").and_then(|v| match v {
+                Value::String(s) => Some(s.as_str()),
+                _ => None,
+            }),
+            Some("url(#paint)")
+        );
     }
 
     fn flatten<'a>(

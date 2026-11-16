@@ -12,7 +12,8 @@ use crate::error::{Error, Result};
 use crate::geometry::primitives::{filter_params, is_meta_attr};
 use crate::geometry::Mat4x3;
 use crate::instruction::{
-    BoolOpKind, EvaluationResult, GeometryInstruction, ModelDesc, ModelUse, PrimitiveKind,
+    BoolOpKind, EvaluationResult, GeometryInstruction, MaterialDesc, ModelDesc, ModelUse,
+    PrimitiveKind,
 };
 use crate::params::{resolve_attr, ParamScope, Value};
 use crate::parser::{Document, Element, Namespace};
@@ -187,12 +188,77 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
         .map(|m| m.id.clone())
         .or_else(|| models.first().map(|m| m.id.clone()));
 
+    let materials = collect_materials(doc, &mut warnings);
+
     Ok(EvaluationResult {
         instructions,
         models,
+        materials,
         active_model,
         warnings,
     })
+}
+
+fn collect_materials(doc: &Document, warnings: &mut Vec<String>) -> Vec<MaterialDesc> {
+    let mut by_id: IndexMap<String, MaterialDesc> = IndexMap::new();
+    for el in doc.root.child_elements() {
+        if !el.is_s3dx("materials") {
+            continue;
+        }
+        for child in el.child_elements() {
+            if !child.is_s3dx("material") {
+                warnings.push(format!(
+                    "s3dx:materials ignores unexpected child <{}>",
+                    child.name
+                ));
+                continue;
+            }
+            let Some(id) = child.id().map(|s| s.to_string()) else {
+                warnings.push("s3dx:material missing id — skipped".into());
+                continue;
+            };
+            if by_id.contains_key(&id) {
+                warnings.push(format!(
+                    "duplicate s3dx:material id '{id}' — later definition wins"
+                ));
+            }
+            let color = parse_material_color(child.attr("color"));
+            let metalness = parse_material_scalar(child.attr("metalness"), 0.0);
+            let roughness = parse_material_scalar(child.attr("roughness"), 0.5);
+            by_id.insert(
+                id.clone(),
+                MaterialDesc {
+                    id,
+                    color,
+                    metalness,
+                    roughness,
+                },
+            );
+        }
+    }
+    by_id.into_values().collect()
+}
+
+fn parse_material_color(raw: Option<&str>) -> [f64; 4] {
+    let Some(raw) = raw else {
+        return [1.0, 1.0, 1.0, 1.0];
+    };
+    match Value::parse_literal(raw) {
+        Value::Vector(v) if v.len() >= 4 => [v[0], v[1], v[2], v[3]],
+        Value::Vector(v) if v.len() == 3 => [v[0], v[1], v[2], 1.0],
+        Value::Number(n) => [n, n, n, 1.0],
+        _ => [1.0, 1.0, 1.0, 1.0],
+    }
+}
+
+fn parse_material_scalar(raw: Option<&str>, default: f64) -> f64 {
+    let Some(raw) = raw else {
+        return default;
+    };
+    match Value::parse_literal(raw) {
+        Value::Number(n) => n,
+        _ => default,
+    }
 }
 
 fn reachable_group_ids<'a>(
@@ -266,17 +332,34 @@ fn collect_models(
 
 fn push_root_scope(scope: &mut ParamScope, el: &Element) {
     // `:root { ... }` applies to the document root (same cascade level as root class rules;
-    // root inline `style` still wins via lookup order: inline → classes).
+    // root inline `style` still wins via lookup order: inline → classes → presentation).
     let mut classes = vec![":root".to_string()];
     classes.extend(el.classes());
     let inline = parse_inline_styles(el.attr("style").unwrap_or(""));
-    scope.push_node(classes, inline);
+    let presentation = presentation_styles(el);
+    scope.push_node(classes, inline, presentation);
 }
 
 fn push_element_scope(scope: &mut ParamScope, el: &Element) {
     let classes = el.classes();
     let inline = parse_inline_styles(el.attr("style").unwrap_or(""));
-    scope.push_node(classes, inline);
+    let presentation = presentation_styles(el);
+    scope.push_node(classes, inline, presentation);
+}
+
+/// Presentation attrs for appearance (`fill`, `opacity`, `material` → `--material`).
+fn presentation_styles(el: &Element) -> IndexMap<String, Value> {
+    let mut out = IndexMap::new();
+    if let Some(fill) = el.attr("fill") {
+        out.insert("fill".to_string(), Value::parse_literal(fill));
+    }
+    if let Some(opacity) = el.attr("opacity") {
+        out.insert("opacity".to_string(), Value::parse_literal(opacity));
+    }
+    if let Some(material) = el.attr("material") {
+        out.insert("--material".to_string(), Value::parse_literal(material));
+    }
+    out
 }
 
 /// Parse element `style="..."` declarations (custom props + presentation).
@@ -424,7 +507,10 @@ fn eval_s3dx(
     if el.name == "use" {
         return eval_use(el, doc, scope, parent_xf, path, warnings, group_cache, visiting);
     }
-    if matches!(el.name.as_str(), "exp" | "model" | "section") {
+    if matches!(
+        el.name.as_str(),
+        "exp" | "model" | "section" | "materials" | "material"
+    ) {
         return Vec::new();
     }
     eval_primitive(el, scope, parent_xf, path, warnings)
