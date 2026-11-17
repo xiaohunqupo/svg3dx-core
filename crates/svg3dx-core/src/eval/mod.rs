@@ -299,10 +299,15 @@ fn collect_models(
             for child in el.child_elements() {
                 if child.is_s3dx("use") {
                     if let Some(href) = child.attr("href") {
-                        let gid = href.trim_start_matches('#').to_string();
+                        let gid = href.trim_start_matches('#').trim();
+                        // Empty href (href="" / href="#") is an unset reference —
+                        // do not treat it as a reachable group id (would be "").
+                        if gid.is_empty() {
+                            continue;
+                        }
                         let t = parse_transform_attr(child, scope, warnings);
                         uses.push(ModelUse {
-                            group_id: gid,
+                            group_id: gid.to_string(),
                             transform: t,
                         });
                     }
