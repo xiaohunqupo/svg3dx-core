@@ -1031,12 +1031,17 @@ fn collect_construct_children(
             if let Some(path) = path_from_child {
                 if params.contains_key("path") {
                     warnings.push(
-                        "s3dx:sweep has both path attribute and <s3dx:path> — using child".into(),
+                        "s3dx:sweep ignores path attribute — use child <s3dx:path> only".into(),
                     );
+                    params.shift_remove("path");
                 }
                 params.insert("path".into(), path);
-            } else if !params.contains_key("path") {
-                warnings.push("s3dx:sweep requires path attribute or <s3dx:path> child".into());
+            } else if params.contains_key("path") {
+                warnings.push(
+                    "s3dx:sweep path attribute is non-normative — prefer child <s3dx:path>".into(),
+                );
+            } else {
+                warnings.push("s3dx:sweep requires a child <s3dx:path>".into());
             }
         }
         PrimitiveKind::Pipe => {

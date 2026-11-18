@@ -65,14 +65,13 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
             "section",
         ],
         PrimitiveKind::Loft => &["solid", "blend", "sections"],
+        // Trajectory is always a child `<s3dx:path>` (no `form` / inline `path`).
         PrimitiveKind::Sweep => &[
-            "form",
             "orient",
             "refDir",
             "solid",
             "corner",
             "cornerRadius",
-            "path",
             "section",
         ],
         PrimitiveKind::Pipe => &[
