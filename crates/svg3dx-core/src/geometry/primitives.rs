@@ -43,6 +43,7 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
         PrimitiveKind::SectorCylinder => &["diameter", "bottomCenterPt", "topCenterPt", "angle"],
         PrimitiveKind::Line => &["from", "to"],
         PrimitiveKind::Arc => &[
+            "form",
             "center",
             "normal",
             "radius",
@@ -52,7 +53,7 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
             "from",
             "to",
         ],
-        PrimitiveKind::Path => &["points", "segments"],
+        PrimitiveKind::Path => &["form", "points", "segments"],
         PrimitiveKind::Extrude => &["origin", "xDir", "normal", "dir", "length", "section"],
         PrimitiveKind::Revolve => &[
             "origin",
@@ -65,6 +66,7 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
         ],
         PrimitiveKind::Loft => &["solid", "blend", "sections"],
         PrimitiveKind::Sweep => &[
+            "form",
             "orient",
             "refDir",
             "solid",
@@ -73,7 +75,14 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
             "path",
             "section",
         ],
-        PrimitiveKind::Pipe => &["radius", "innerRadius", "corner", "cornerRadius", "path"],
+        PrimitiveKind::Pipe => &[
+            "form",
+            "radius",
+            "innerRadius",
+            "corner",
+            "cornerRadius",
+            "path",
+        ],
         PrimitiveKind::Mesh => &[
             "mode",
             "position",
