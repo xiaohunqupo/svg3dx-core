@@ -329,6 +329,86 @@ mod tests {
         );
     }
 
+    #[test]
+    fn svg_metadata_and_foreign_ns_preserved_but_not_evaluated() {
+        use crate::parser::{Namespace, Node};
+
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1"
+             xmlns:acme="urn:acme:equipment:1.0">
+          <metadata>
+            <acme:profile version="1.0"/>
+          </metadata>
+          <defs>
+            <g id="vessel">
+              <g id="shell">
+                <metadata>
+                  <acme:equipment tag="V-101"/>
+                </metadata>
+                <s3dx:cylinder diameter="1200"
+                               bottomCenterPt="0 0 0" topCenterPt="0 0 2000"/>
+              </g>
+              <g id="nozzle-n1"
+                 s3dx:transform="matrix(0 0 -1 0 1 0 1 0 0 600 0 1000)">
+                <metadata>
+                  <acme:nozzle tag="N1" nominalSize="DN100"/>
+                </metadata>
+                <s3dx:cylinder diameter="100"
+                               bottomCenterPt="0 0 0" topCenterPt="0 0 200"/>
+              </g>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#vessel"/>
+          </s3dx:model>
+        </svg>"##;
+
+        let doc = parse_xml(svg).unwrap();
+        fn walk<'a>(el: &'a crate::parser::Element, out: &mut Vec<&'a crate::parser::Element>) {
+            out.push(el);
+            for child in &el.children {
+                if let Node::Element(e) = child {
+                    walk(e, out);
+                }
+            }
+        }
+        let mut all = Vec::new();
+        walk(&doc.root, &mut all);
+        let metadatas: Vec<_> = all
+            .iter()
+            .filter(|e| e.ns == Namespace::Svg && e.name == "metadata")
+            .collect();
+        assert!(
+            metadatas.len() >= 3,
+            "expected document + shell + nozzle metadata, got {}",
+            metadatas.len()
+        );
+        let foreign = all
+            .iter()
+            .filter(|e| e.ns == Namespace::Other)
+            .map(|e| e.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(foreign.contains(&"profile"), "{foreign:?}");
+        assert!(foreign.contains(&"equipment"), "{foreign:?}");
+        assert!(foreign.contains(&"nozzle"), "{foreign:?}");
+
+        let result = evaluate_document(&doc, EvalOptions::default()).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        let prims: Vec<_> = result
+            .instructions
+            .iter()
+            .flat_map(flatten)
+            .filter(|i| matches!(i, GeometryInstruction::Primitive { .. }))
+            .collect();
+        assert_eq!(prims.len(), 2, "shell + nozzle cylinders only");
+        for p in &prims {
+            if let GeometryInstruction::Primitive { kind, .. } = p {
+                assert_eq!(*kind, PrimitiveKind::Cylinder);
+            }
+        }
+    }
+
     fn flatten<'a>(
         inst: &'a GeometryInstruction,
     ) -> Box<dyn Iterator<Item = &'a GeometryInstruction> + 'a> {

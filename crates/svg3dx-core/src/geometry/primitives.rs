@@ -62,6 +62,7 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
             "axisOrigin",
             "axisDir",
             "angle",
+            "solid",
             "section",
         ],
         PrimitiveKind::Loft => &["solid", "blend", "sections"],
