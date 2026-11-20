@@ -186,6 +186,96 @@ mod tests {
     }
 
     #[test]
+    fn s3dx_transform_trs_with_params() {
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <style>:root { --x: 100; --yaw: 0; }</style>
+          <defs>
+            <g id="main">
+              <s3dx:box length="20" width="20" height="20"
+                        lengthVec="1 0 0" widthVec="0 1 0"
+                        s3dx:transform="translate(var(--x) 0 0) rotate(0 var(--yaw) 0) scale(1 1 1)"/>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#main"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        let prim = result
+            .instructions
+            .iter()
+            .flat_map(|i| flatten(i))
+            .find(|i| {
+                matches!(
+                    i,
+                    GeometryInstruction::Primitive {
+                        kind: PrimitiveKind::Box,
+                        ..
+                    }
+                )
+            })
+            .expect("box");
+        let xf = prim.transform().unwrap();
+        assert!((xf.m[9] - 100.0).abs() < 1e-9, "{:?}", xf.m);
+    }
+
+    #[test]
+    fn trs_translate_var_equals_matrix() {
+        let mk = |xf: &str| {
+            format!(
+                r##"<svg svg3d="true" xmlns="http://www.w3.org/2000/svg" xmlns:s3dx="urn:s3dx:draft:0.1">
+              <style>:root {{ --gap: 40; }}</style>
+              <defs><g id="main">
+                <s3dx:box length="10" width="10" height="10" lengthVec="1 0 0" widthVec="0 1 0"
+                  s3dx:transform="{xf}"/>
+              </g></defs>
+              <s3dx:model id="m" mode="solid" active="true"><s3dx:use href="#main"/></s3dx:model>
+            </svg>"##,
+                xf = xf
+            )
+        };
+        let box_xf = |result: &EvaluationResult| {
+            result
+                .instructions
+                .iter()
+                .flat_map(|i| flatten(i))
+                .find_map(|i| match i {
+                    GeometryInstruction::Primitive {
+                        kind: PrimitiveKind::Box,
+                        transform,
+                        ..
+                    } => Some(*transform),
+                    _ => None,
+                })
+                .expect("box")
+        };
+        let a = parse_and_evaluate(&mk(
+            "translate(var(--gap) var(--gap) var(--gap))",
+        ))
+        .unwrap();
+        let b = parse_and_evaluate(&mk(
+            "matrix(1 0 0 0 1 0 0 0 1 var(--gap) var(--gap) var(--gap))",
+        ))
+        .unwrap();
+        assert!(a.warnings.is_empty(), "{:?}", a.warnings);
+        assert!(b.warnings.is_empty(), "{:?}", b.warnings);
+        let ta = box_xf(&a);
+        let tb = box_xf(&b);
+        for i in 0..12 {
+            assert!(
+                (ta.m[i] - tb.m[i]).abs() < 1e-9,
+                "m[{i}] {:?} vs {:?}",
+                ta.m,
+                tb.m
+            );
+        }
+        assert!((ta.m[9] - 40.0).abs() < 1e-9, "{:?}", ta.m);
+    }
+
+    #[test]
     fn s3dx_transform_not_svg_transform() {
         let svg = r##"
         <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"

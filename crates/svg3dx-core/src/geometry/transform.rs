@@ -4,6 +4,15 @@ use std::fmt;
 use crate::error::Warning;
 use crate::params::types::Value;
 
+/// How `s3dx:transform` was written (self-describing from syntax).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransformSyntax {
+    /// `matrix(...)` or bare 12-number list.
+    Matrix,
+    /// `translate(...) rotate(...) scale(...)` (any subset).
+    Trs,
+}
+
 /// 12-number 3D transform: 3×3 linear + translation.
 /// Layout: [a b c  d e f  g h i  tx ty tz]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -36,11 +45,78 @@ impl Mat4x3 {
         Ok(Self { m })
     }
 
-    /// Parse `matrix(a,b,c, d,e,f, g,h,i, tx,ty,tz)` or a bare 12-number list.
+    /// Compose TRS: `M = T · R · S` (scale, then rotate XYZ degrees, then translate).
+    pub fn from_trs(
+        tx: f64,
+        ty: f64,
+        tz: f64,
+        rx_deg: f64,
+        ry_deg: f64,
+        rz_deg: f64,
+        sx: f64,
+        sy: f64,
+        sz: f64,
+    ) -> Self {
+        let s = Self {
+            m: [sx, 0.0, 0.0, 0.0, sy, 0.0, 0.0, 0.0, sz, 0.0, 0.0, 0.0],
+        };
+        let r = rotation_xyz_deg(rx_deg, ry_deg, rz_deg);
+        let t = Self {
+            m: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, tx, ty, tz],
+        };
+        t.mul(r.mul(s))
+    }
+
+    /// Detect matrix vs TRS from attribute text (before or after expression expand).
+    pub fn detect_syntax(raw: &str) -> Option<TransformSyntax> {
+        let s = raw.trim();
+        if s.is_empty() {
+            return None;
+        }
+        let lower = s.to_ascii_lowercase();
+        let has_matrix = lower.contains("matrix(");
+        let has_trs = looks_like_trs(&lower);
+        if has_matrix && has_trs {
+            // Mixed: prefer first recognizable form.
+            if let Some(first) = first_transform_keyword(&lower) {
+                return Some(match first {
+                    "matrix" => TransformSyntax::Matrix,
+                    _ => TransformSyntax::Trs,
+                });
+            }
+        }
+        if has_matrix {
+            return Some(TransformSyntax::Matrix);
+        }
+        if has_trs {
+            return Some(TransformSyntax::Trs);
+        }
+        // Bare number list → matrix.
+        if s
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|t| !t.is_empty())
+            .all(|t| t.parse::<f64>().is_ok())
+        {
+            return Some(TransformSyntax::Matrix);
+        }
+        None
+    }
+
+    /// Parse `matrix(...)`, bare 12-number list, or TRS function list.
     /// Embedded expressions should already be expanded into numbers.
     pub fn parse(raw: &str) -> Result<Self, Warning> {
         let s = raw.trim();
-        let inner = if let Some(rest) = s.strip_prefix("matrix(") {
+        if s.is_empty() {
+            return Ok(Self::identity());
+        }
+        match Self::detect_syntax(s) {
+            Some(TransformSyntax::Trs) => Self::parse_trs(s),
+            Some(TransformSyntax::Matrix) | None => Self::parse_matrix(s),
+        }
+    }
+
+    fn parse_matrix(s: &str) -> Result<Self, Warning> {
+        let inner = if let Some(rest) = strip_prefix_ci(s, "matrix(") {
             rest.strip_suffix(')')
                 .ok_or_else(|| Warning::new("unclosed matrix("))?
         } else {
@@ -57,11 +133,78 @@ impl Mat4x3 {
         Self::from_slice(&nums?)
     }
 
+    fn parse_trs(s: &str) -> Result<Self, Warning> {
+        let mut tx = 0.0;
+        let mut ty = 0.0;
+        let mut tz = 0.0;
+        let mut rx = 0.0;
+        let mut ry = 0.0;
+        let mut rz = 0.0;
+        let mut sx = 1.0;
+        let mut sy = 1.0;
+        let mut sz = 1.0;
+        let mut saw_any = false;
+
+        for (name, args) in iter_transform_funcs(s)? {
+            let nums = parse_func_nums(&args, &name)?;
+            match name.as_str() {
+                "translate" => {
+                    saw_any = true;
+                    tx = *nums.first().unwrap_or(&0.0);
+                    ty = *nums.get(1).unwrap_or(&0.0);
+                    tz = *nums.get(2).unwrap_or(&0.0);
+                }
+                "rotate" => {
+                    saw_any = true;
+                    rx = *nums.first().unwrap_or(&0.0);
+                    ry = *nums.get(1).unwrap_or(&0.0);
+                    rz = *nums.get(2).unwrap_or(&0.0);
+                }
+                "scale" => {
+                    saw_any = true;
+                    match nums.as_slice() {
+                        [] => {}
+                        [u] => {
+                            sx = *u;
+                            sy = *u;
+                            sz = *u;
+                        }
+                        [a, b] => {
+                            sx = *a;
+                            sy = *b;
+                            sz = 1.0;
+                        }
+                        [a, b, c, ..] => {
+                            sx = *a;
+                            sy = *b;
+                            sz = *c;
+                        }
+                    }
+                }
+                "matrix" => {
+                    return Err(Warning::new(
+                        "s3dx:transform: cannot mix matrix(...) with TRS functions",
+                    ));
+                }
+                other => {
+                    return Err(Warning::new(format!(
+                        "s3dx:transform: unknown function '{other}'"
+                    )));
+                }
+            }
+        }
+
+        if !saw_any {
+            return Err(Warning::new("s3dx:transform: empty TRS value"));
+        }
+        Ok(Self::from_trs(tx, ty, tz, rx, ry, rz, sx, sy, sz))
+    }
+
     pub fn from_value(v: &Value) -> Result<Self, Warning> {
         match v {
             Value::Vector(nums) => Self::from_slice(nums),
             Value::String(s) => Self::parse(s),
-            _ => Err(Warning::new("transform must be a 12-number matrix")),
+            _ => Err(Warning::new("transform must be a 12-number matrix or TRS")),
         }
     }
 
@@ -70,43 +213,7 @@ impl Mat4x3 {
     pub fn mul(self, other: Self) -> Self {
         let a = &self.m;
         let b = &other.m;
-        // 3x3 blocks
-        let r00 = a[0] * b[0] + a[3] * b[1] + a[6] * b[2];
-        let r01 = a[1] * b[0] + a[4] * b[1] + a[7] * b[2];
-        let r02 = a[2] * b[0] + a[5] * b[1] + a[8] * b[2];
 
-        let r10 = a[0] * b[3] + a[3] * b[4] + a[6] * b[5];
-        let r11 = a[1] * b[3] + a[4] * b[4] + a[7] * b[5];
-        let r12 = a[2] * b[3] + a[5] * b[4] + a[8] * b[5];
-
-        let r20 = a[0] * b[6] + a[3] * b[7] + a[6] * b[8];
-        let r21 = a[1] * b[6] + a[4] * b[7] + a[7] * b[8];
-        let r22 = a[2] * b[6] + a[5] * b[7] + a[8] * b[8];
-
-        let tx = a[0] * b[9] + a[3] * b[10] + a[6] * b[11] + a[9];
-        let ty = a[1] * b[9] + a[4] * b[10] + a[7] * b[11] + a[10];
-        let tz = a[2] * b[9] + a[5] * b[10] + a[8] * b[11] + a[11];
-
-        // Store as row-major of columns? Spec uses matrix(a,b,c, d,e,f, g,h,i, tx,ty,tz)
-        // where (a,b,c) is first column of 3x3, (d,e,f) second, (g,h,i) third.
-        // Our indexing: m[0]=a, m[1]=b, m[2]=c, m[3]=d, ...
-        // Wait - I used a[0],a[3],a[6] as a row which assumes row-major storage of
-        // [[a,d,g],[b,e,h],[c,f,i]]. Let's verify:
-        // Column 0 = (a,b,c) = (m[0],m[1],m[2])
-        // Column 1 = (d,e,f) = (m[3],m[4],m[5])
-        // Column 2 = (g,h,i) = (m[6],m[7],m[8])
-        // So matrix times vector: x' = a*x + d*y + g*z + tx
-        // Which is m[0]*x + m[3]*y + m[6]*z + m[9]
-        //
-        // For mul M*N: result column j = M * (N column j)
-        // Actually my formula mixed things. Let me recompute properly.
-
-        // Recompute with correct column-vector convention:
-        let _ = (r00, r01, r02, r10, r11, r12, r20, r21, r22, tx, ty, tz);
-
-        // N columns:
-        // n0=(b0,b1,b2), n1=(b3,b4,b5), n2=(b6,b7,b8), nt=(b9,b10,b11)
-        // M * n0:
         let c0x = a[0] * b[0] + a[3] * b[1] + a[6] * b[2];
         let c0y = a[1] * b[0] + a[4] * b[1] + a[7] * b[2];
         let c0z = a[2] * b[0] + a[5] * b[1] + a[8] * b[2];
@@ -134,6 +241,135 @@ impl Mat4x3 {
     }
 }
 
+fn rotation_xyz_deg(rx_deg: f64, ry_deg: f64, rz_deg: f64) -> Mat4x3 {
+    let rx = rx_deg.to_radians();
+    let ry = ry_deg.to_radians();
+    let rz = rz_deg.to_radians();
+    let (cx, sx) = (rx.cos(), rx.sin());
+    let (cy, sy) = (ry.cos(), ry.sin());
+    let (cz, sz) = (rz.cos(), rz.sin());
+
+    // R = Rz * Ry * Rx (THREE Euler order 'XYZ')
+    let mx = Mat4x3 {
+        m: [1.0, 0.0, 0.0, 0.0, cx, sx, 0.0, -sx, cx, 0.0, 0.0, 0.0],
+    };
+    let my = Mat4x3 {
+        m: [cy, 0.0, -sy, 0.0, 1.0, 0.0, sy, 0.0, cy, 0.0, 0.0, 0.0],
+    };
+    let mz = Mat4x3 {
+        m: [cz, sz, 0.0, -sz, cz, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+    };
+    mz.mul(my.mul(mx))
+}
+
+fn looks_like_trs(lower: &str) -> bool {
+    lower.contains("translate(") || lower.contains("rotate(") || lower.contains("scale(")
+}
+
+fn first_transform_keyword(lower: &str) -> Option<&'static str> {
+    let candidates = [
+        ("matrix(", "matrix"),
+        ("translate(", "translate"),
+        ("rotate(", "rotate"),
+        ("scale(", "scale"),
+    ];
+    let mut best: Option<(usize, &'static str)> = None;
+    for (pat, name) in candidates {
+        if let Some(i) = lower.find(pat) {
+            if best.map(|(bi, _)| i < bi).unwrap_or(true) {
+                best = Some((i, name));
+            }
+        }
+    }
+    best.map(|(_, n)| n)
+}
+
+fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    if s.len() >= prefix.len() && s[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        Some(&s[prefix.len()..])
+    } else {
+        None
+    }
+}
+
+/// Yield `(name_lowercase, args_inside_parens)` for each `name(...)` in `s`.
+fn iter_transform_funcs(s: &str) -> Result<Vec<(String, String)>, Warning> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    let mut out = Vec::new();
+    while i < chars.len() {
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+        if i >= chars.len() {
+            break;
+        }
+        let start = i;
+        while i < chars.len() && (chars[i].is_ascii_alphabetic() || chars[i] == '_') {
+            i += 1;
+        }
+        if i == start {
+            return Err(Warning::new(format!(
+                "s3dx:transform: unexpected character near '{}'",
+                chars[start]
+            )));
+        }
+        let name: String = chars[start..i].iter().collect::<String>().to_ascii_lowercase();
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+        if i >= chars.len() || chars[i] != '(' {
+            return Err(Warning::new(format!(
+                "s3dx:transform: expected '(' after '{name}'"
+            )));
+        }
+        i += 1; // skip '('
+        let args_start = i;
+        let mut depth = 1i32;
+        while i < chars.len() {
+            match chars[i] {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let args: String = chars[args_start..i].iter().collect();
+                        out.push((name.clone(), args));
+                        i += 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        if depth != 0 {
+            return Err(Warning::new(format!(
+                "s3dx:transform: unclosed '(' in '{name}'"
+            )));
+        }
+    }
+    Ok(out)
+}
+
+fn parse_func_nums(args: &str, name: &str) -> Result<Vec<f64>, Warning> {
+    let nums: Result<Vec<f64>, _> = args
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|t| !t.is_empty())
+        .map(|t| {
+            t.parse::<f64>()
+                .map_err(|_| Warning::new(format!("invalid {name} number: {t}")))
+        })
+        .collect();
+    let nums = nums?;
+    if nums.len() > 3 {
+        return Err(Warning::new(format!(
+            "{name}(...) expects at most 3 numbers, got {}",
+            nums.len()
+        )));
+    }
+    Ok(nums)
+}
+
 impl fmt::Display for Mat4x3 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -159,6 +395,17 @@ impl fmt::Display for Mat4x3 {
 mod tests {
     use super::*;
 
+    fn approx_eq(a: &Mat4x3, b: &Mat4x3) {
+        for i in 0..12 {
+            assert!(
+                (a.m[i] - b.m[i]).abs() < 1e-9,
+                "m[{i}]: {} vs {}",
+                a.m[i],
+                b.m[i]
+            );
+        }
+    }
+
     #[test]
     fn parse_identity() {
         let m = Mat4x3::parse("matrix(1,0,0, 0,1,0, 0,0,1, 0,0,0)").unwrap();
@@ -169,10 +416,60 @@ mod tests {
     fn compose_translation() {
         let a = Mat4x3::parse("matrix(1,0,0, 0,1,0, 0,0,1, 10,0,0)").unwrap();
         let b = Mat4x3::parse("matrix(1,0,0, 0,1,0, 0,0,1, 0,20,0)").unwrap();
-        // apply b first then a: (0,20,0) then + (10,0,0) = (10,20,0)
         let c = a.mul(b);
         assert_eq!(c.m[9], 10.0);
         assert_eq!(c.m[10], 20.0);
         assert_eq!(c.m[11], 0.0);
+    }
+
+    #[test]
+    fn parse_trs_translate_only() {
+        let m = Mat4x3::parse("translate(10 20 30)").unwrap();
+        let expect = Mat4x3::parse("matrix(1 0 0 0 1 0 0 0 1 10 20 30)").unwrap();
+        approx_eq(&m, &expect);
+    }
+
+    #[test]
+    fn parse_trs_rotate_y_45() {
+        let m = Mat4x3::parse("rotate(0 45 0)").unwrap();
+        let from = Mat4x3::from_trs(0.0, 0.0, 0.0, 0.0, 45.0, 0.0, 1.0, 1.0, 1.0);
+        approx_eq(&m, &from);
+        // X axis maps toward +Z for +Y rotation (right-handed).
+        let c = 45f64.to_radians().cos();
+        let s = 45f64.to_radians().sin();
+        assert!((m.m[0] - c).abs() < 1e-9);
+        assert!((m.m[2] - (-s)).abs() < 1e-9);
+        assert!((m.m[6] - s).abs() < 1e-9);
+        assert!((m.m[8] - c).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_trs_full_order_independent() {
+        let a = Mat4x3::parse("scale(2 3 4) translate(1 2 3) rotate(10 20 30)").unwrap();
+        let b = Mat4x3::parse("translate(1 2 3) rotate(10 20 30) scale(2 3 4)").unwrap();
+        approx_eq(&a, &b);
+        let expect = Mat4x3::from_trs(1.0, 2.0, 3.0, 10.0, 20.0, 30.0, 2.0, 3.0, 4.0);
+        approx_eq(&a, &expect);
+    }
+
+    #[test]
+    fn detect_syntax() {
+        assert_eq!(
+            Mat4x3::detect_syntax("matrix(1 0 0 0 1 0 0 0 1 0 0 0)"),
+            Some(TransformSyntax::Matrix)
+        );
+        assert_eq!(
+            Mat4x3::detect_syntax("translate(1 0 0)"),
+            Some(TransformSyntax::Trs)
+        );
+        assert_eq!(
+            Mat4x3::detect_syntax("1 0 0 0 1 0 0 0 1 0 0 0"),
+            Some(TransformSyntax::Matrix)
+        );
+        // Mixed → first keyword wins
+        assert_eq!(
+            Mat4x3::detect_syntax("translate(1 0 0) matrix(1 0 0 0 1 0 0 0 1 0 0 0)"),
+            Some(TransformSyntax::Trs)
+        );
     }
 }
