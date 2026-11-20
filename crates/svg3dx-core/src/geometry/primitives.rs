@@ -55,16 +55,8 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
         ],
         PrimitiveKind::Path => &["form", "points", "segments"],
         PrimitiveKind::Extrude => &["origin", "xDir", "normal", "dir", "length", "section"],
-        PrimitiveKind::Revolve => &[
-            "origin",
-            "xDir",
-            "normal",
-            "axisOrigin",
-            "axisDir",
-            "angle",
-            "solid",
-            "section",
-        ],
+        // Axis = body +Z; section pose/transform on child <s3dx:section>.
+        PrimitiveKind::Revolve => &["angle", "solid", "section"],
         PrimitiveKind::Loft => &["solid", "blend", "sections"],
         // Trajectory is always a child `<s3dx:path>` (no `form` / inline `path`).
         PrimitiveKind::Sweep => &[

@@ -877,25 +877,32 @@ fn eval_child_attrs(
     map
 }
 
-/// Evaluate `<s3dx:section>`: pose attrs + SVG shape children (`tag` + attrs).
+/// Evaluate `<s3dx:section>`: pose attrs + optional `s3dx:transform` + 2D SVG shapes.
 fn eval_section(
     el: &Element,
-    scope: &ParamScope,
+    scope: &mut ParamScope,
     warnings: &mut Vec<String>,
 ) -> IndexMap<String, Value> {
     let mut map = eval_child_attrs(el, scope, warnings);
+    let xf = parse_transform_attr(el, scope, warnings);
+    if xf != Mat4x3::identity() {
+        let mut xf_map = IndexMap::new();
+        xf_map.insert("m".into(), Value::Vector(xf.m.to_vec()));
+        map.insert("transform".into(), Value::Map(xf_map));
+    }
     let mut shapes = Vec::new();
     for child in el.child_elements() {
-        let ok = match child.ns {
-            Namespace::Svg => matches!(
+        if child.is_s3dx("exp") {
+            continue;
+        }
+        let ok = child.ns == Namespace::Svg
+            && matches!(
                 child.name.as_str(),
                 "path" | "circle" | "ellipse" | "polygon" | "polyline" | "rect"
-            ),
-            _ => false,
-        };
+            );
         if !ok {
             warnings.push(format!(
-                "s3dx:section ignores unexpected <{}>",
+                "s3dx:section ignores unexpected <{}> (2D shapes only)",
                 if child.ns == Namespace::S3dx {
                     format!("s3dx:{}", child.name)
                 } else {
@@ -963,7 +970,7 @@ fn eval_path(
 fn collect_construct_children(
     kind: PrimitiveKind,
     el: &Element,
-    scope: &ParamScope,
+    scope: &mut ParamScope,
     params: &mut IndexMap<String, Value>,
     warnings: &mut Vec<String>,
 ) {
