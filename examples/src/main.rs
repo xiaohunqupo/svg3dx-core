@@ -10,7 +10,14 @@ fn dump_all(insts: &[svg3dx_core::GeometryInstruction], depth: usize) {
     for (i, inst) in insts.iter().enumerate() {
         match inst {
             Primitive { kind, params, .. } => {
-                println!("{pad}[{i}] {:?} corner={:?} r={:?}", kind, params.get("corner"), params.get("cornerRadius"));
+                println!(
+                    "{pad}[{i}] {:?} outer={:?} inner={:?} rO={:?} rI={:?}",
+                    kind,
+                    params.get("outerCorner"),
+                    params.get("innerCorner"),
+                    params.get("outerCornerRadius"),
+                    params.get("innerCornerRadius"),
+                );
                 if let Some(p) = params.get("path") { println!("{pad}  path={p:?}"); }
             }
             Group { children, .. } => {
