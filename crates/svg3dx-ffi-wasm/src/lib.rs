@@ -25,20 +25,24 @@ pub fn parse_svg3dx_json(input: &str) -> Result<String, JsValue> {
 /// `params` is a JSON object of string → string/number/bool.
 /// `model` optionally selects `<s3dx:model id="...">`.
 /// `retain_inactive` keeps skipped if/if-not branches (default false).
+/// `extra_defs_json` is a JSON string array of extra named defs group ids.
 #[wasm_bindgen]
 pub fn parse_svg3dx_with_params(
     input: &str,
     params_json: &str,
     model: Option<String>,
     retain_inactive: Option<bool>,
+    extra_defs_json: Option<String>,
 ) -> Result<JsValue, JsValue> {
     let external = parse_params_json(params_json)?;
+    let extra_defs = parse_string_array_json(extra_defs_json.as_deref())?;
     let result = parse_and_evaluate_with(
         input,
         EvalOptions {
             external,
             model,
             retain_inactive: retain_inactive.unwrap_or(false),
+            extra_defs,
         },
     )
     .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -123,6 +127,17 @@ impl Svg3dxSession {
         let update = self
             .inner
             .set_retain_inactive(retain)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        self.store_update(update)
+    }
+
+    /// On-demand extra named defs group ids (JSON string array).
+    #[wasm_bindgen(js_name = setExtraDefs)]
+    pub fn set_extra_defs(&mut self, extra_defs_json: &str) -> Result<JsValue, JsValue> {
+        let ids = parse_string_array_json(Some(extra_defs_json))?;
+        let update = self
+            .inner
+            .set_extra_defs(ids)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         self.store_update(update)
     }
@@ -278,6 +293,13 @@ fn parse_params_json(params_json: &str) -> Result<HashMap<String, Value>, JsValu
         external.insert(k, json_to_value(v));
     }
     Ok(external)
+}
+
+fn parse_string_array_json(json: Option<&str>) -> Result<Vec<String>, JsValue> {
+    let Some(raw) = json.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_str(raw).map_err(|e| JsValue::from_str(&format!("extra_defs JSON: {e}")))
 }
 
 fn json_to_value(v: serde_json::Value) -> Value {

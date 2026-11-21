@@ -87,6 +87,7 @@ pub extern "C" fn svg3dx_parse_with_params(
         external,
         model: model_id,
         retain_inactive: false,
+        extra_defs: Vec::new(),
     };
 
     match parse_and_evaluate_with(text, opts) {

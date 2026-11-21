@@ -58,7 +58,8 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
         // Axis = body +Z; section pose/transform on child <s3dx:section>.
         PrimitiveKind::Revolve => &["angle", "solid", "section"],
         PrimitiveKind::Loft => &["solid", "blend", "sections"],
-        // Trajectory is always a child `<s3dx:path>` (no `form` / inline `path`).
+        // Trajectory is a child `<s3dx:path>` folded into the `path` param
+        // (no markup attribute / `form="inline"` — unlike `pipe`).
         PrimitiveKind::Sweep => &[
             "orient",
             "refDir",
@@ -69,6 +70,7 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
             "innerCornerRadius",
             "miterLimit",
             "section",
+            "path",
         ],
         PrimitiveKind::Pipe => &[
             "form",

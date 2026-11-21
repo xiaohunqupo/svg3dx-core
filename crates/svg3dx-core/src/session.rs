@@ -38,6 +38,7 @@ pub struct DocumentSession {
     external: HashMap<String, Value>,
     model: Option<String>,
     retain_inactive: bool,
+    extra_defs: Vec<String>,
     last: Option<EvaluationResult>,
     revision: u64,
 }
@@ -52,6 +53,7 @@ impl DocumentSession {
             external: HashMap::new(),
             model: None,
             retain_inactive: false,
+            extra_defs: Vec::new(),
             last: None,
             revision: 0,
         };
@@ -71,6 +73,7 @@ impl DocumentSession {
             external: normalize_param_map(params),
             model,
             retain_inactive: false,
+            extra_defs: Vec::new(),
             last: None,
             revision: 0,
         };
@@ -81,6 +84,12 @@ impl DocumentSession {
     /// When true, skipped if/if-not branches stay in the result as `inactive` groups.
     pub fn set_retain_inactive(&mut self, retain: bool) -> Result<UpdateResult> {
         self.retain_inactive = retain;
+        self.evaluate_internal(Vec::new(), true)
+    }
+
+    /// Replace on-demand extra defs group ids (beyond the active model's uses).
+    pub fn set_extra_defs(&mut self, ids: Vec<String>) -> Result<UpdateResult> {
+        self.extra_defs = ids;
         self.evaluate_internal(Vec::new(), true)
     }
 
@@ -211,6 +220,7 @@ impl DocumentSession {
                 external: self.external.clone(),
                 model: self.model.clone(),
                 retain_inactive: self.retain_inactive,
+                extra_defs: self.extra_defs.clone(),
             },
         )?;
         // Keep only whitelist keys in the session snapshot (rejected keys already warned).

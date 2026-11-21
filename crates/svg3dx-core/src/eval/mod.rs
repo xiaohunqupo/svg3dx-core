@@ -25,6 +25,9 @@ pub struct EvalOptions {
     /// Keep skipped `if` / `if-not` groups marked `inactive` (default false).
     /// Live evaluation omits them; hosts that preview false branches opt in.
     pub retain_inactive: bool,
+    /// Extra named defs `<g>` ids to evaluate/emit beyond the active model's
+    /// reachable set (on-demand preview). Empty by default.
+    pub extra_defs: Vec<String>,
 }
 
 impl Default for EvalOptions {
@@ -33,6 +36,7 @@ impl Default for EvalOptions {
             external: HashMap::new(),
             model: None,
             retain_inactive: false,
+            extra_defs: Vec::new(),
         }
     }
 }
@@ -63,8 +67,10 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
     scope.set_class_rules(class_map);
 
     let models = collect_models(doc, &mut scope, &mut warnings, opts.model.as_deref());
-    // Only groups referenced by the active model(s) are evaluated / emitted.
+    // Live eval: only groups referenced by the active model, plus any
+    // host-requested `extra_defs` (on-demand preview of unused definitions).
     let reachable = reachable_group_ids(models.iter().filter(|m| m.active));
+    let extra: HashSet<String> = opts.extra_defs.iter().cloned().collect();
 
     let mut group_cache: HashMap<String, Vec<GeometryInstruction>> = HashMap::new();
     let mut visiting = HashSet::new();
@@ -77,7 +83,10 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
             for child in el.child_elements() {
                 if child.is_svg("g") {
                     if let Some(id) = child.id() {
-                        if reachable.is_empty() || reachable.contains(id) {
+                        if reachable.is_empty()
+                            || reachable.contains(id)
+                            || extra.contains(id)
+                        {
                             let mut path = PathCtx::named(id);
                             let inst = eval_group(
                                 child,
@@ -151,6 +160,28 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
                 }
             }
         }
+    }
+
+    let mut extras: Vec<String> = extra.into_iter().filter(|id| !emitted.contains(id)).collect();
+    extras.sort();
+    for id in extras {
+        let Some(geom) = group_cache.get(&id) else {
+            if doc.find_by_id(&id).is_none() {
+                warnings.push(format!("extra defs group '{id}' not found"));
+            }
+            continue;
+        };
+        let styles = group_styles(doc, &id, &scope);
+        let local_xf = named_group_local_xf(doc, &id, &mut scope, &mut warnings);
+        emitted.insert(id.clone());
+        instructions.push(GeometryInstruction::Group {
+            node_id: id.clone(),
+            id: Some(id),
+            styles,
+            children: geom.clone(),
+            transform: local_xf,
+            inactive: false,
+        });
     }
 
     if models.is_empty() {

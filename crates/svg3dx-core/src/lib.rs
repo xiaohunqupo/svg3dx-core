@@ -243,6 +243,55 @@ mod tests {
     }
 
     #[test]
+    fn extra_defs_includes_requested_unused_groups() {
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <defs>
+            <g id="used">
+              <s3dx:box length="1" width="1" height="1"
+                        lengthVec="1 0 0" widthVec="0 1 0"/>
+            </g>
+            <g id="unused">
+              <s3dx:sphere radius="2" center="0 0 0"/>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#used"/>
+          </s3dx:model>
+        </svg>"##;
+        let live = parse_and_evaluate(svg).unwrap();
+        let live_ids: Vec<_> = live
+            .instructions
+            .iter()
+            .filter_map(|i| match i {
+                GeometryInstruction::Group { id: Some(id), .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(live_ids, ["used"]);
+
+        let with_extra = parse_and_evaluate_with(
+            svg,
+            EvalOptions {
+                extra_defs: vec!["unused".into()],
+                ..EvalOptions::default()
+            },
+        )
+        .unwrap();
+        let ids: Vec<_> = with_extra
+            .instructions
+            .iter()
+            .filter_map(|i| match i {
+                GeometryInstruction::Group { id: Some(id), .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(ids.contains(&"used"));
+        assert!(ids.contains(&"unused"));
+    }
+
+    #[test]
     fn if_transform_stays_on_wrapper_not_children() {
         let svg = r##"
         <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
