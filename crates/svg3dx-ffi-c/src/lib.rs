@@ -86,6 +86,7 @@ pub extern "C" fn svg3dx_parse_with_params(
     let opts = EvalOptions {
         external,
         model: model_id,
+        retain_inactive: false,
     };
 
     match parse_and_evaluate_with(text, opts) {

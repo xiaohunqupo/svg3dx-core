@@ -59,6 +59,7 @@ pub fn parse_and_evaluate_with_params(
         EvalOptions {
             external,
             model,
+            ..EvalOptions::default()
         },
     )
 }
@@ -178,13 +179,30 @@ mod tests {
             <s3dx:use href="#tanks"/>
           </s3dx:model>
         </svg>"##;
-        let result = parse_and_evaluate(svg).unwrap();
-        let json = to_json(&result).unwrap();
-        assert!(json.contains("\"radius\": 50") || json.contains("\"radius\":50"));
-        assert!(json.contains("\"length\": 1") || json.contains("\"length\":1"));
-        // False branch is still emitted (inactive) for editor ghost preview.
-        assert!(json.contains("\"inactive\":true") || json.contains("\"inactive\": true"));
-        assert!(json.contains("\"length\": 9") || json.contains("\"length\":9"));
+        let live = parse_and_evaluate(svg).unwrap();
+        let live_json = to_json(&live).unwrap();
+        assert!(live_json.contains("\"radius\": 50") || live_json.contains("\"radius\":50"));
+        assert!(live_json.contains("\"length\": 1") || live_json.contains("\"length\":1"));
+        // Live evaluation drops skipped branches.
+        assert!(!live_json.contains("\"inactive\""));
+        assert!(!live_json.contains("\"length\": 9") && !live_json.contains("\"length\":9"));
+
+        let retained = parse_and_evaluate_with(
+            svg,
+            EvalOptions {
+                retain_inactive: true,
+                ..EvalOptions::default()
+            },
+        )
+        .unwrap();
+        let retained_json = to_json(&retained).unwrap();
+        assert!(
+            retained_json.contains("\"inactive\":true")
+                || retained_json.contains("\"inactive\": true")
+        );
+        assert!(
+            retained_json.contains("\"length\": 9") || retained_json.contains("\"length\":9")
+        );
     }
 
     #[test]

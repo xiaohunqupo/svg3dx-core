@@ -24,15 +24,24 @@ pub fn parse_svg3dx_json(input: &str) -> Result<String, JsValue> {
 
 /// `params` is a JSON object of string → string/number/bool.
 /// `model` optionally selects `<s3dx:model id="...">`.
+/// `retain_inactive` keeps skipped if/if-not branches (default false).
 #[wasm_bindgen]
 pub fn parse_svg3dx_with_params(
     input: &str,
     params_json: &str,
     model: Option<String>,
+    retain_inactive: Option<bool>,
 ) -> Result<JsValue, JsValue> {
     let external = parse_params_json(params_json)?;
-    let result = parse_and_evaluate_with(input, EvalOptions { external, model })
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let result = parse_and_evaluate_with(
+        input,
+        EvalOptions {
+            external,
+            model,
+            retain_inactive: retain_inactive.unwrap_or(false),
+        },
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))?;
     serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
@@ -104,6 +113,16 @@ impl Svg3dxSession {
         let update = self
             .inner
             .set_model(model)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        self.store_update(update)
+    }
+
+    /// Keep skipped if/if-not branches as `inactive` groups (re-evaluates).
+    #[wasm_bindgen(js_name = setRetainInactive)]
+    pub fn set_retain_inactive(&mut self, retain: bool) -> Result<JsValue, JsValue> {
+        let update = self
+            .inner
+            .set_retain_inactive(retain)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         self.store_update(update)
     }

@@ -22,6 +22,9 @@ pub struct EvalOptions {
     pub external: HashMap<String, Value>,
     /// Override active model by id (external `model=...`).
     pub model: Option<String>,
+    /// Keep skipped `if` / `if-not` groups marked `inactive` (default false).
+    /// Live evaluation omits them; hosts that preview false branches opt in.
+    pub retain_inactive: bool,
 }
 
 impl Default for EvalOptions {
@@ -29,6 +32,7 @@ impl Default for EvalOptions {
         Self {
             external: HashMap::new(),
             model: None,
+            retain_inactive: false,
         }
     }
 }
@@ -198,6 +202,12 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
 
     let materials = collect_materials(doc, &mut warnings);
 
+    if !opts.retain_inactive {
+        for inst in &mut instructions {
+            strip_inactive_groups(inst);
+        }
+    }
+
     Ok(EvaluationResult {
         instructions,
         models,
@@ -205,6 +215,24 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
         active_model,
         warnings,
     })
+}
+
+/// Drop skipped condition wrappers from a live evaluation tree.
+fn strip_inactive_groups(inst: &mut GeometryInstruction) {
+    match inst {
+        GeometryInstruction::Group { children, .. } => {
+            children.retain(|c| !c.is_inactive());
+            for child in children.iter_mut() {
+                strip_inactive_groups(child);
+            }
+        }
+        GeometryInstruction::BoolOp { operands, .. } => {
+            for child in operands.iter_mut() {
+                strip_inactive_groups(child);
+            }
+        }
+        GeometryInstruction::Primitive { .. } | GeometryInstruction::Instance { .. } => {}
+    }
 }
 
 fn collect_materials(doc: &Document, warnings: &mut Vec<String>) -> Vec<MaterialDesc> {

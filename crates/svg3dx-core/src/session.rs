@@ -37,6 +37,7 @@ pub struct DocumentSession {
     doc: Document,
     external: HashMap<String, Value>,
     model: Option<String>,
+    retain_inactive: bool,
     last: Option<EvaluationResult>,
     revision: u64,
 }
@@ -50,6 +51,7 @@ impl DocumentSession {
             doc,
             external: HashMap::new(),
             model: None,
+            retain_inactive: false,
             last: None,
             revision: 0,
         };
@@ -68,11 +70,18 @@ impl DocumentSession {
             doc,
             external: normalize_param_map(params),
             model,
+            retain_inactive: false,
             last: None,
             revision: 0,
         };
         let update = session.evaluate_internal(Vec::new(), true)?;
         Ok((session, update))
+    }
+
+    /// When true, skipped if/if-not branches stay in the result as `inactive` groups.
+    pub fn set_retain_inactive(&mut self, retain: bool) -> Result<UpdateResult> {
+        self.retain_inactive = retain;
+        self.evaluate_internal(Vec::new(), true)
     }
 
     pub fn revision(&self) -> u64 {
@@ -201,6 +210,7 @@ impl DocumentSession {
             EvalOptions {
                 external: self.external.clone(),
                 model: self.model.clone(),
+                retain_inactive: self.retain_inactive,
             },
         )?;
         // Keep only whitelist keys in the session snapshot (rejected keys already warned).
