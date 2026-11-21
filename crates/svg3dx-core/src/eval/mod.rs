@@ -103,12 +103,15 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
             if emitted.insert(u.group_id.clone()) {
                 if let Some(geom) = group_cache.get(&u.group_id) {
                     let styles = group_styles(doc, &u.group_id, &scope);
+                    let local_xf =
+                        named_group_local_xf(doc, &u.group_id, &mut scope, &mut warnings);
                     instructions.push(GeometryInstruction::Group {
                         node_id: u.group_id.clone(),
                         id: Some(u.group_id.clone()),
                         styles,
                         children: geom.clone(),
-                        transform: Mat4x3::identity(),
+                        transform: local_xf,
+                        inactive: false,
                     });
                 } else if let Some(el) = doc.find_by_id(&u.group_id) {
                     let mut path = PathCtx::named(&u.group_id);
@@ -129,12 +132,15 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
                         scope.pop_node();
                         s
                     };
+                    let local_xf =
+                        named_group_local_xf(doc, &u.group_id, &mut scope, &mut warnings);
                     instructions.push(GeometryInstruction::Group {
                         node_id: u.group_id.clone(),
                         id: Some(u.group_id.clone()),
                         styles,
                         children: geom,
-                        transform: Mat4x3::identity(),
+                        transform: local_xf,
+                        inactive: false,
                     });
                 } else {
                     warnings.push(format!("model references missing group '{}'", u.group_id));
@@ -163,18 +169,20 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
                     &mut group_cache,
                     &mut visiting,
                 );
-                let styles = {
+                let (styles, local_xf) = {
                     push_element_scope(&mut scope, el);
                     let s = scope.resolved_styles();
+                    let xf = parse_transform_attr(el, &scope, &mut warnings);
                     scope.pop_node();
-                    s
+                    (s, xf)
                 };
                 instructions.push(GeometryInstruction::Group {
                     node_id,
                     id: el.id().map(|s| s.to_string()),
                     styles,
                     children: geom,
-                    transform: Mat4x3::identity(),
+                    transform: local_xf,
+                    inactive: false,
                 });
             }
         }
@@ -416,12 +424,28 @@ fn expand_then_parse_matrix(raw: &str, scope: &ParamScope) -> std::result::Resul
     }
 }
 
+/// Local `s3dx:transform` of a named `<g id>` (for library wrappers).
+fn named_group_local_xf(
+    doc: &Document,
+    group_id: &str,
+    scope: &mut ParamScope,
+    warnings: &mut Vec<String>,
+) -> Mat4x3 {
+    let Some(el) = doc.find_by_id(group_id) else {
+        return Mat4x3::identity();
+    };
+    push_element_scope(scope, el);
+    let xf = parse_transform_attr(el, scope, warnings);
+    scope.pop_node();
+    xf
+}
+
 #[allow(clippy::too_many_arguments)]
 fn eval_group(
     el: &Element,
     doc: &Document,
     scope: &mut ParamScope,
-    parent_xf: Mat4x3,
+    _parent_xf: Mat4x3,
     path: &mut PathCtx,
     warnings: &mut Vec<String>,
     group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
@@ -429,16 +453,16 @@ fn eval_group(
 ) -> Vec<GeometryInstruction> {
     push_element_scope(scope, el);
 
-    let local_xf = parse_transform_attr(el, scope, warnings);
-    let xf = local_xf.then(parent_xf);
-
+    // Children stay in this group's local frame. The library / nested wrapper
+    // Group carries `s3dx:transform` so the editor gizmo can edit it without
+    // snap-back (baking into children left the wrapper at identity).
     let mut out = Vec::new();
     for child in el.child_elements() {
         out.extend(eval_node(
             child,
             doc,
             scope,
-            xf,
+            Mat4x3::identity(),
             path,
             warnings,
             group_cache,
@@ -463,24 +487,39 @@ fn eval_node(
 ) -> Vec<GeometryInstruction> {
     match el.ns {
         Namespace::Svg if el.name == "g" => {
-            // Nested <g>: grouping / param scope / transform; children flatten into parent list.
-            // Path uses id or g:n so descendants get stable node_ids.
-            let mut child_path = if let Some(id) = el.id() {
-                path.child_prefix(id)
+            // Nested <g>: emit a Group so `s3dx:transform` stays on the wrapper
+            // (same as if / named library groups) for editor gizmos.
+            push_element_scope(scope, el);
+            let local_xf = parse_transform_attr(el, scope, warnings);
+            let (node_id, mut child_path) = if let Some(id) = el.id() {
+                (id.to_string(), path.child_prefix(id))
             } else {
                 let id = path.next("g");
-                path.under(&id)
+                (id.clone(), path.under(&id))
             };
-            eval_group(
-                el,
-                doc,
-                scope,
-                parent_xf,
-                &mut child_path,
-                warnings,
-                group_cache,
-                visiting,
-            )
+            let mut children = Vec::new();
+            for child in el.child_elements() {
+                children.extend(eval_node(
+                    child,
+                    doc,
+                    scope,
+                    Mat4x3::identity(),
+                    &mut child_path,
+                    warnings,
+                    group_cache,
+                    visiting,
+                ));
+            }
+            let styles = scope.resolved_styles();
+            scope.pop_node();
+            vec![GeometryInstruction::Group {
+                node_id,
+                id: el.id().map(|s| s.to_string()),
+                styles,
+                children,
+                transform: local_xf.then(parent_xf),
+                inactive: false,
+            }]
         }
         Namespace::S3dx => {
             eval_s3dx(el, doc, scope, parent_xf, path, warnings, group_cache, visiting)
@@ -534,34 +573,47 @@ fn eval_condition(
 ) -> Vec<GeometryInstruction> {
     push_element_scope(scope, el);
 
-    if !condition::should_include_branch(el, scope, warnings) {
-        scope.pop_node();
-        return Vec::new();
-    }
-
+    let include = condition::should_include_branch(el, scope, warnings);
     let local_xf = parse_transform_attr(el, scope, warnings);
-    let xf = local_xf.then(parent_xf);
-    let mut child_path = {
-        let id = path.next(el.name.as_str());
-        path.under(&id)
-    };
+    // Always consume a path slot so sibling if:N indices match markup order,
+    // even when the branch is skipped.
+    let node_id = path.next(el.name.as_str());
+    let mut child_path = path.under(&node_id);
 
-    let mut out = Vec::new();
+    // Keep `s3dx:transform` on the wrapper Group (editor gizmo target). Children
+    // are evaluated in the if-local frame so the Three.js hierarchy matches
+    // world = parent * local_if * child — otherwise the gizmo snaps back after
+    // commit while only the baked children move.
+    //
+    // `local_xf` only: parent transform lives on ancestor Groups (named / nested
+    // g). `then(parent_xf)` remains for flat parents (e.g. loop iterations).
+    let mut children = Vec::new();
     for child in el.child_elements() {
-        out.extend(eval_node(
+        children.extend(eval_node(
             child,
             doc,
             scope,
-            xf,
+            Mat4x3::identity(),
             &mut child_path,
             warnings,
             group_cache,
             visiting,
         ));
     }
-
+    let styles = scope.resolved_styles();
     scope.pop_node();
-    out
+
+    // Wrap so each if occupies one child index under the parent group (stable
+    // treePath). Inactive wrappers are hidden in the live view and ghosted when
+    // the editor selects that branch.
+    vec![GeometryInstruction::Group {
+        node_id,
+        id: None,
+        styles,
+        children,
+        transform: local_xf.then(parent_xf),
+        inactive: !include,
+    }]
 }
 
 fn inject_loop_vars(scope: &mut ParamScope, index: usize, value: Value) {
@@ -672,6 +724,8 @@ fn eval_bool(
             visiting,
         ));
     }
+    // Skipped if/if-not branches are preview-only — never boolean operands.
+    operands.retain(|o| !o.is_inactive());
     let styles = scope.resolved_styles();
     scope.pop_node();
 
@@ -706,7 +760,6 @@ fn eval_use(
     };
     let gid = href.trim_start_matches('#');
     let use_xf = parse_transform_attr(el, scope, warnings);
-    let xf = use_xf.then(parent_xf);
     let use_id = path.next("use");
 
     if !visiting.insert(gid.to_string()) {
@@ -716,6 +769,11 @@ fn eval_use(
 
     push_element_scope(scope, el);
     let use_styles = scope.resolved_styles();
+    // Cache stores group-local children; fold the target group's own
+    // `s3dx:transform` into this use wrapper (model view applies it on the
+    // library Group separately via `named_group_local_xf` at emit time).
+    let named_xf = named_group_local_xf(doc, gid, scope, warnings);
+    let xf = named_xf.then(use_xf).then(parent_xf);
 
     let result = if let Some(cached) = group_cache.get(gid) {
         let mut children = cached.clone();
@@ -728,6 +786,7 @@ fn eval_use(
             styles: use_styles,
             children,
             transform: xf,
+            inactive: false,
         }]
     } else if let Some(target) = doc.find_by_id(gid) {
         if !group_has_3d(target) {
@@ -760,6 +819,7 @@ fn eval_use(
             styles: use_styles,
             children,
             transform: xf,
+            inactive: false,
         }]
     } else {
         warnings.push(format!("s3dx:use references unknown id '{gid}'"));

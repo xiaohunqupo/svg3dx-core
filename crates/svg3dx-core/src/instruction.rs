@@ -66,12 +66,17 @@ pub enum GeometryInstruction {
         transform: Mat4x3,
     },
     /// A named group expanded in-place (used when emitting defs content).
+    /// Also wraps `s3dx:if` / `s3dx:if-not` so skipped branches keep a stable
+    /// path slot; `inactive` marks a false branch for editor ghost preview.
     Group {
         node_id: String,
         id: Option<String>,
         styles: IndexMap<String, Value>,
         children: Vec<GeometryInstruction>,
         transform: Mat4x3,
+        /// False condition branch: still emitted for editor preview, not drawn live.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        inactive: bool,
     },
 }
 
@@ -83,6 +88,11 @@ impl GeometryInstruction {
             | Self::Instance { node_id, .. }
             | Self::Group { node_id, .. } => node_id,
         }
+    }
+
+    /// True when this node is a skipped `if` / `if-not` branch (editor preview only).
+    pub fn is_inactive(&self) -> bool {
+        matches!(self, Self::Group { inactive: true, .. })
     }
 
     pub fn styles(&self) -> &IndexMap<String, Value> {

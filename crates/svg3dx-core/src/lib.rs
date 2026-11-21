@@ -182,7 +182,9 @@ mod tests {
         let json = to_json(&result).unwrap();
         assert!(json.contains("\"radius\": 50") || json.contains("\"radius\":50"));
         assert!(json.contains("\"length\": 1") || json.contains("\"length\":1"));
-        assert!(!json.contains("\"length\": 9") && !json.contains("\"length\":9"));
+        // False branch is still emitted (inactive) for editor ghost preview.
+        assert!(json.contains("\"inactive\":true") || json.contains("\"inactive\": true"));
+        assert!(json.contains("\"length\": 9") || json.contains("\"length\":9"));
     }
 
     #[test]
@@ -220,6 +222,90 @@ mod tests {
             })
             .collect();
         assert_eq!(boxes.len(), 4);
+    }
+
+    #[test]
+    fn if_transform_stays_on_wrapper_not_children() {
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <defs>
+            <g id="main">
+              <s3dx:if test="1 = 1" s3dx:transform="matrix(1 0 0 0 1 0 0 0 1 50 0 0)">
+                <s3dx:box length="10" width="10" height="10"
+                          lengthVec="1 0 0" widthVec="0 1 0"/>
+              </s3dx:if>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#main"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        let root = result.instructions.first().expect("main group");
+        let GeometryInstruction::Group { children, .. } = root else {
+            panic!("expected group");
+        };
+        let GeometryInstruction::Group {
+            transform: if_xf,
+            children: if_kids,
+            ..
+        } = children.first().expect("if wrapper")
+        else {
+            panic!("expected if group");
+        };
+        assert!(
+            (if_xf.m[9] - 50.0).abs() < 1e-9,
+            "if wrapper tx {:?}",
+            if_xf.m
+        );
+        let prim = if_kids.iter().find_map(|c| match c {
+            GeometryInstruction::Primitive { transform, .. } => Some(transform),
+            _ => None,
+        });
+        let prim_xf = prim.expect("box under if");
+        assert!(
+            prim_xf.m[9].abs() < 1e-9,
+            "child must stay local-identity, got {:?}",
+            prim_xf.m
+        );
+    }
+
+    #[test]
+    fn named_group_transform_stays_on_wrapper() {
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <defs>
+            <g id="main" s3dx:transform="matrix(1 0 0 0 1 0 0 0 1 25 0 0)">
+              <s3dx:box length="10" width="10" height="10"
+                        lengthVec="1 0 0" widthVec="0 1 0"/>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#main"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        let GeometryInstruction::Group {
+            transform,
+            children,
+            ..
+        } = result.instructions.first().expect("main")
+        else {
+            panic!("expected group");
+        };
+        assert!((transform.m[9] - 25.0).abs() < 1e-9, "{:?}", transform.m);
+        let prim = children.iter().find_map(|c| match c {
+            GeometryInstruction::Primitive { transform, .. } => Some(transform),
+            _ => None,
+        });
+        assert!(
+            prim.expect("box").m[9].abs() < 1e-9,
+            "box must not bake group tx"
+        );
     }
 
     #[test]
