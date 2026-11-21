@@ -8,6 +8,7 @@ pub mod error;
 pub mod eval;
 pub mod geometry;
 pub mod instruction;
+pub mod package;
 pub mod params;
 pub mod parser;
 pub mod session;
@@ -18,6 +19,10 @@ pub use eval::{evaluate_document, EvalOptions};
 pub use instruction::{
     BoolOpKind, EvaluationResult, GeometryInstruction, MaterialDesc, ModelDesc, ModelUse,
     PrimitiveKind,
+};
+pub use package::{
+    normalize_package_path, open_document_bytes, open_svg3dxz, write_svg3dxz, Svg3dxPackage,
+    MAIN_ENTRY,
 };
 pub use params::{
     externalizable_root_names, externalizable_root_params, filter_external_params,
@@ -86,6 +91,38 @@ mod tests {
         assert!(result.warnings.is_empty(), "{:?}", result.warnings);
         assert_eq!(result.active_model.as_deref(), Some("m"));
         assert!(!result.instructions.is_empty());
+    }
+
+    #[test]
+    fn gltf_href_in_params() {
+        use crate::instruction::{GeometryInstruction, PrimitiveKind};
+        use crate::params::types::Value;
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <defs>
+            <g id="g1">
+              <s3dx:gltf href="assets/bunny.glb"/>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#g1"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        let found = result.instructions.iter().any(|i| match i {
+            GeometryInstruction::Group { children, .. } => children.iter().any(|c| matches!(
+                c,
+                GeometryInstruction::Primitive {
+                    kind: PrimitiveKind::Gltf,
+                    params,
+                    ..
+                } if matches!(params.get("href"), Some(Value::String(s)) if s == "assets/bunny.glb")
+            )),
+            _ => false,
+        });
+        assert!(found, "expected gltf primitive with href param: {:?}", result.instructions);
     }
 
     #[test]

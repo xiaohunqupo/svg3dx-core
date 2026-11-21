@@ -162,8 +162,7 @@ pub enum PrimitiveKind {
     Loft,
     Sweep,
     Pipe,
-    Mesh,
-    Triangles,
+    Gltf,
     /// Unknown / future primitive; params preserved as-is.
     Other,
 }
@@ -190,8 +189,7 @@ impl PrimitiveKind {
             "loft" => Self::Loft,
             "sweep" => Self::Sweep,
             "pipe" => Self::Pipe,
-            "mesh" => Self::Mesh,
-            "triangles" => Self::Triangles,
+            "gltf" => Self::Gltf,
             _ => Self::Other,
         }
     }
@@ -215,8 +213,7 @@ impl PrimitiveKind {
             Self::Loft => "loft",
             Self::Sweep => "sweep",
             Self::Pipe => "pipe",
-            Self::Mesh => "mesh",
-            Self::Triangles => "triangles",
+            Self::Gltf => "gltf",
             Self::Other => "other",
         }
     }

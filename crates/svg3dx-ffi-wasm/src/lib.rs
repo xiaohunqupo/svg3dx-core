@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use svg3dx_core::{
-    parse_and_evaluate_with, to_json, update_to_json, DocumentSession, EvalOptions, UpdateResult,
-    Value,
+    open_document_bytes, open_svg3dxz, parse_and_evaluate_with, to_json, update_to_json,
+    write_svg3dxz, DocumentSession, EvalOptions, Svg3dxPackage, UpdateResult, Value,
 };
 use wasm_bindgen::prelude::*;
 
@@ -168,6 +168,83 @@ impl Svg3dxSession {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         self.last_update = Some(update);
         Ok(js)
+    }
+}
+
+/// Opened `.svg3dxz` / document package for JS hosts.
+#[wasm_bindgen]
+pub struct Svg3dxPackageHandle {
+    inner: Svg3dxPackage,
+}
+
+#[wasm_bindgen]
+impl Svg3dxPackageHandle {
+    #[wasm_bindgen(getter = mainXml)]
+    pub fn main_xml(&self) -> String {
+        self.inner.main_xml.clone()
+    }
+
+    /// Relative asset paths (excludes `main.svg3dx`).
+    #[wasm_bindgen(js_name = assetPaths)]
+    pub fn asset_paths(&self) -> Vec<String> {
+        self.inner.assets.keys().cloned().collect()
+    }
+
+    /// Raw bytes for a relative asset path, or `undefined` if missing.
+    #[wasm_bindgen(js_name = assetBytes)]
+    pub fn asset_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        self.inner.assets.get(path).cloned()
+    }
+
+    /// Write this package back to `.svg3dxz` bytes.
+    pub fn write(&self) -> Result<Vec<u8>, JsValue> {
+        write_svg3dxz(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+/// Open a `.svg3dxz` ZIP (`Uint8Array` / bytes).
+#[wasm_bindgen(js_name = openSvg3dxz)]
+pub fn open_svg3dxz_js(data: &[u8]) -> Result<Svg3dxPackageHandle, JsValue> {
+    let inner = open_svg3dxz(data).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(Svg3dxPackageHandle { inner })
+}
+
+/// Open standalone `.svg3dx` UTF-8 or `.svg3dxz` ZIP.
+/// `hint` is typically the file name (e.g. `model.svg3dxz`).
+#[wasm_bindgen(js_name = openDocumentBytes)]
+pub fn open_document_bytes_js(
+    data: &[u8],
+    hint: Option<String>,
+) -> Result<Svg3dxPackageHandle, JsValue> {
+    let inner = open_document_bytes(data, hint.as_deref())
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(Svg3dxPackageHandle { inner })
+}
+
+/// Build and write a `.svg3dxz` package.
+#[wasm_bindgen]
+pub struct Svg3dxPackageBuilder {
+    inner: Svg3dxPackage,
+}
+
+#[wasm_bindgen]
+impl Svg3dxPackageBuilder {
+    #[wasm_bindgen(constructor)]
+    pub fn new(main_xml: &str) -> Svg3dxPackageBuilder {
+        Self {
+            inner: Svg3dxPackage::new(main_xml),
+        }
+    }
+
+    #[wasm_bindgen(js_name = setAsset)]
+    pub fn set_asset(&mut self, path: &str, data: &[u8]) -> Result<(), JsValue> {
+        self.inner
+            .set_asset(path, data.to_vec())
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn write(&self) -> Result<Vec<u8>, JsValue> {
+        write_svg3dxz(&self.inner).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
 

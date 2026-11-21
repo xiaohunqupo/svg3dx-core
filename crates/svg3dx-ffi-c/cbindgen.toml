@@ -15,6 +15,8 @@ after_includes = """
 
 typedef struct Svg3dxResult Svg3dxResult;
 typedef struct Svg3dxSession Svg3dxSession;
+typedef struct Svg3dxPackageHandle Svg3dxPackageHandle;
+typedef struct Svg3dxBuffer Svg3dxBuffer;
 """
 
 [export]
@@ -35,6 +37,23 @@ include = [
     "svg3dx_session_evaluate",
     "svg3dx_session_revision",
     "svg3dx_session_free",
+    "svg3dx_package_open",
+    "svg3dx_package_open_document",
+    "svg3dx_package_create",
+    "svg3dx_package_set_asset",
+    "svg3dx_package_main_xml",
+    "svg3dx_package_main_xml_len",
+    "svg3dx_package_asset_count",
+    "svg3dx_package_asset_path",
+    "svg3dx_package_asset_path_len",
+    "svg3dx_package_asset_data",
+    "svg3dx_package_asset_len",
+    "svg3dx_package_write",
+    "svg3dx_package_free",
+    "svg3dx_buffer_data",
+    "svg3dx_buffer_len",
+    "svg3dx_buffer_free",
+    "svg3dx_string_free",
 ]
 item_types = ["functions", "typedefs"]
 

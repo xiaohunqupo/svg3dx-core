@@ -11,6 +11,8 @@ pub enum Error {
     Svg3dDisabled,
     #[error("internal error: {0}")]
     Internal(String),
+    #[error("package error: {0}")]
+    Package(String),
 }
 
 /// Non-fatal evaluation warning: subtree was skipped.

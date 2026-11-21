@@ -30,12 +30,17 @@ $outFile = if ($Check) {
 }
 
 Write-Host "==> cbindgen -> $(if ($Check) { 'temp (check)' } else { 'cpp\include\svg3dx.h' })"
+# cbindgen prints expected "Can't find Svg3dx*" warnings for opaque types; capture without
+# treating stderr as a terminating NativeCommandError under $ErrorActionPreference Stop.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 $stderr = & cbindgen --config $config --crate svg3dx-ffi-c --output $outFile 2>&1
 $code = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
 foreach ($line in $stderr) {
   $text = "$line"
-  # Opaque Svg3dxResult / Svg3dxSession are declared in after_includes (Rust-only fields).
-  if ($text -match "Can't find Svg3dx(Result|Session)") { continue }
+  # Opaque structs are declared in after_includes (Rust-only fields).
+  if ($text -match "Can't find Svg3dx(Result|Session|PackageHandle|Buffer)") { continue }
   Write-Host $text
 }
 if ($code -ne 0) {

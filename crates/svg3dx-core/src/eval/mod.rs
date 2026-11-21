@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::error::{Error, Result};
-use crate::geometry::primitives::{filter_params, is_meta_attr};
+use crate::geometry::primitives::{filter_params, is_meta_attr, known_attrs};
 use crate::geometry::Mat4x3;
 use crate::instruction::{
     BoolOpKind, EvaluationResult, GeometryInstruction, MaterialDesc, ModelDesc, ModelUse,
@@ -806,9 +806,13 @@ fn eval_primitive(
     let xf = local_xf.then(parent_xf);
     let styles = scope.resolved_styles();
 
+    // Keep meta attrs that this kind lists (e.g. gltf/@href); filter_params
+    // applies the same rule as a second pass for construct-child merges.
+    let known = known_attrs(kind);
     let mut params = IndexMap::new();
     for (name, raw) in &el.attrs {
-        if is_meta_attr(name) {
+        let listed = known.iter().any(|n| *n == name.as_str());
+        if is_meta_attr(name) && !listed {
             continue;
         }
         if let Some(v) = overrides.get(name) {

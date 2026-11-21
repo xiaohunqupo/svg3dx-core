@@ -9,6 +9,8 @@
 
 typedef struct Svg3dxResult Svg3dxResult;
 typedef struct Svg3dxSession Svg3dxSession;
+typedef struct Svg3dxPackageHandle Svg3dxPackageHandle;
+typedef struct Svg3dxBuffer Svg3dxBuffer;
 
 
 #ifdef __cplusplus
@@ -69,6 +71,63 @@ size_t svg3dx_result_warning_count(const Svg3dxResult *result);
 
 // Free a result returned by parse / session APIs.
 void svg3dx_free_result(Svg3dxResult *result);
+
+// Open a `.svg3dxz` ZIP. On failure returns NULL and optionally fills `*out_error`
+// with a malloc'd C string (caller frees via `svg3dx_string_free`).
+Svg3dxPackageHandle *svg3dx_package_open(const uint8_t *data, size_t data_len, char **out_error);
+
+// Open standalone UTF-8 `.svg3dx` or `.svg3dxz` ZIP.
+// `hint` may be NULL; typically a file name like `model.svg3dxz`.
+Svg3dxPackageHandle *svg3dx_package_open_document(const uint8_t *data,
+                                                  size_t data_len,
+                                                  const char *hint,
+                                                  char **out_error);
+
+// Create an empty package with the given UTF-8 `main.svg3dx` text.
+Svg3dxPackageHandle *svg3dx_package_create(const uint8_t *main_xml,
+                                           size_t main_xml_len,
+                                           char **out_error);
+
+// Add or replace a sidecar asset. `path` is a relative package path (NUL-terminated).
+// Returns false on error (see `out_error`).
+bool svg3dx_package_set_asset(Svg3dxPackageHandle *package,
+                              const char *path,
+                              const uint8_t *data,
+                              size_t data_len,
+                              char **out_error);
+
+// UTF-8 pointer to `main.svg3dx` text (not NUL-terminated; use `svg3dx_package_main_xml_len`).
+const uint8_t *svg3dx_package_main_xml(const Svg3dxPackageHandle *package);
+
+size_t svg3dx_package_main_xml_len(const Svg3dxPackageHandle *package);
+
+size_t svg3dx_package_asset_count(const Svg3dxPackageHandle *package);
+
+// Relative path bytes at `index` (UTF-8, not NUL-terminated). Length via
+// `svg3dx_package_asset_path_len`.
+const uint8_t *svg3dx_package_asset_path(const Svg3dxPackageHandle *package, size_t index);
+
+size_t svg3dx_package_asset_path_len(const Svg3dxPackageHandle *package, size_t index);
+
+// Asset bytes at `index` (not owned; valid until package is freed). Length via
+// `svg3dx_package_asset_len`.
+const uint8_t *svg3dx_package_asset_data(const Svg3dxPackageHandle *package, size_t index);
+
+size_t svg3dx_package_asset_len(const Svg3dxPackageHandle *package, size_t index);
+
+// Write package to `.svg3dxz` bytes. Caller frees with `svg3dx_buffer_free`.
+Svg3dxBuffer *svg3dx_package_write(const Svg3dxPackageHandle *package, char **out_error);
+
+const uint8_t *svg3dx_buffer_data(const Svg3dxBuffer *buf);
+
+size_t svg3dx_buffer_len(const Svg3dxBuffer *buf);
+
+void svg3dx_buffer_free(Svg3dxBuffer *buf);
+
+void svg3dx_package_free(Svg3dxPackageHandle *package);
+
+// Free a C string allocated by package APIs (`out_error`).
+void svg3dx_string_free(char *s);
 
 #ifdef __cplusplus
 }  // extern "C"

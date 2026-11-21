@@ -10,8 +10,8 @@ use std::ptr;
 use std::slice;
 
 use svg3dx_core::{
-    parse_and_evaluate_with, to_json, update_to_json, DocumentSession, EvalOptions, UpdateResult,
-    Value,
+    open_document_bytes, open_svg3dxz, parse_and_evaluate_with, to_json, update_to_json,
+    write_svg3dxz, DocumentSession, EvalOptions, Svg3dxPackage, UpdateResult, Value,
 };
 
 pub struct Svg3dxResult {
@@ -392,6 +392,314 @@ pub extern "C" fn svg3dx_free_result(result: *mut Svg3dxResult) {
     }
     unsafe {
         drop(Box::from_raw(result));
+    }
+}
+
+pub struct Svg3dxPackageHandle {
+    inner: Svg3dxPackage,
+}
+
+pub struct Svg3dxBuffer {
+    data: Vec<u8>,
+}
+
+/// Open a `.svg3dxz` ZIP. On failure returns NULL and optionally fills `*out_error`
+/// with a malloc'd C string (caller frees via `svg3dx_string_free`).
+#[no_mangle]
+pub extern "C" fn svg3dx_package_open(
+    data: *const u8,
+    data_len: usize,
+    out_error: *mut *mut c_char,
+) -> *mut Svg3dxPackageHandle {
+    set_out_error(out_error, None);
+    let bytes = match raw_bytes(data, data_len) {
+        Ok(b) => b,
+        Err(e) => {
+            set_out_error(out_error, Some(e));
+            return ptr::null_mut();
+        }
+    };
+    match open_svg3dxz(bytes) {
+        Ok(inner) => Box::into_raw(Box::new(Svg3dxPackageHandle { inner })),
+        Err(e) => {
+            set_out_error(out_error, Some(e.to_string()));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Open standalone UTF-8 `.svg3dx` or `.svg3dxz` ZIP.
+/// `hint` may be NULL; typically a file name like `model.svg3dxz`.
+#[no_mangle]
+pub extern "C" fn svg3dx_package_open_document(
+    data: *const u8,
+    data_len: usize,
+    hint: *const c_char,
+    out_error: *mut *mut c_char,
+) -> *mut Svg3dxPackageHandle {
+    set_out_error(out_error, None);
+    let bytes = match raw_bytes(data, data_len) {
+        Ok(b) => b,
+        Err(e) => {
+            set_out_error(out_error, Some(e));
+            return ptr::null_mut();
+        }
+    };
+    let hint = match optional_cstr(hint) {
+        Ok(h) => h,
+        Err(e) => {
+            set_out_error(out_error, Some(e));
+            return ptr::null_mut();
+        }
+    };
+    match open_document_bytes(bytes, hint.as_deref()) {
+        Ok(inner) => Box::into_raw(Box::new(Svg3dxPackageHandle { inner })),
+        Err(e) => {
+            set_out_error(out_error, Some(e.to_string()));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Create an empty package with the given UTF-8 `main.svg3dx` text.
+#[no_mangle]
+pub extern "C" fn svg3dx_package_create(
+    main_xml: *const u8,
+    main_xml_len: usize,
+    out_error: *mut *mut c_char,
+) -> *mut Svg3dxPackageHandle {
+    set_out_error(out_error, None);
+    let text = match read_utf8(main_xml, main_xml_len) {
+        Ok(s) => s,
+        Err(e) => {
+            set_out_error(out_error, Some(e));
+            return ptr::null_mut();
+        }
+    };
+    Box::into_raw(Box::new(Svg3dxPackageHandle {
+        inner: Svg3dxPackage::new(text),
+    }))
+}
+
+/// Add or replace a sidecar asset. `path` is a relative package path (NUL-terminated).
+/// Returns false on error (see `out_error`).
+#[no_mangle]
+pub extern "C" fn svg3dx_package_set_asset(
+    package: *mut Svg3dxPackageHandle,
+    path: *const c_char,
+    data: *const u8,
+    data_len: usize,
+    out_error: *mut *mut c_char,
+) -> bool {
+    set_out_error(out_error, None);
+    if package.is_null() {
+        set_out_error(out_error, Some("null package".into()));
+        return false;
+    }
+    let path = match optional_cstr(path) {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            set_out_error(out_error, Some("null path".into()));
+            return false;
+        }
+        Err(e) => {
+            set_out_error(out_error, Some(e));
+            return false;
+        }
+    };
+    let bytes = match raw_bytes(data, data_len) {
+        Ok(b) => b.to_vec(),
+        Err(e) => {
+            set_out_error(out_error, Some(e));
+            return false;
+        }
+    };
+    match unsafe { &mut *package }.inner.set_asset(path, bytes) {
+        Ok(()) => true,
+        Err(e) => {
+            set_out_error(out_error, Some(e.to_string()));
+            false
+        }
+    }
+}
+
+/// UTF-8 pointer to `main.svg3dx` text (not NUL-terminated; use `svg3dx_package_main_xml_len`).
+#[no_mangle]
+pub extern "C" fn svg3dx_package_main_xml(package: *const Svg3dxPackageHandle) -> *const u8 {
+    if package.is_null() {
+        return ptr::null();
+    }
+    unsafe { (&(*package).inner.main_xml).as_ptr() }
+}
+
+#[no_mangle]
+pub extern "C" fn svg3dx_package_main_xml_len(package: *const Svg3dxPackageHandle) -> usize {
+    if package.is_null() {
+        return 0;
+    }
+    unsafe { (&(*package).inner.main_xml).len() }
+}
+
+#[no_mangle]
+pub extern "C" fn svg3dx_package_asset_count(package: *const Svg3dxPackageHandle) -> usize {
+    if package.is_null() {
+        return 0;
+    }
+    unsafe { (&(*package).inner.assets).len() }
+}
+
+/// Relative path bytes at `index` (UTF-8, not NUL-terminated). Length via
+/// `svg3dx_package_asset_path_len`.
+#[no_mangle]
+pub extern "C" fn svg3dx_package_asset_path(
+    package: *const Svg3dxPackageHandle,
+    index: usize,
+) -> *const u8 {
+    if package.is_null() {
+        return ptr::null();
+    }
+    let assets = unsafe { &(*package).inner.assets };
+    match assets.get_index(index) {
+        Some((path, _)) => path.as_ptr(),
+        None => ptr::null(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn svg3dx_package_asset_path_len(
+    package: *const Svg3dxPackageHandle,
+    index: usize,
+) -> usize {
+    if package.is_null() {
+        return 0;
+    }
+    let assets = unsafe { &(*package).inner.assets };
+    match assets.get_index(index) {
+        Some((path, _)) => path.len(),
+        None => 0,
+    }
+}
+
+/// Asset bytes at `index` (not owned; valid until package is freed). Length via
+/// `svg3dx_package_asset_len`.
+#[no_mangle]
+pub extern "C" fn svg3dx_package_asset_data(
+    package: *const Svg3dxPackageHandle,
+    index: usize,
+) -> *const u8 {
+    if package.is_null() {
+        return ptr::null();
+    }
+    let assets = unsafe { &(*package).inner.assets };
+    match assets.get_index(index) {
+        Some((_, data)) => data.as_ptr(),
+        None => ptr::null(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn svg3dx_package_asset_len(
+    package: *const Svg3dxPackageHandle,
+    index: usize,
+) -> usize {
+    if package.is_null() {
+        return 0;
+    }
+    let assets = unsafe { &(*package).inner.assets };
+    match assets.get_index(index) {
+        Some((_, data)) => data.len(),
+        None => 0,
+    }
+}
+
+/// Write package to `.svg3dxz` bytes. Caller frees with `svg3dx_buffer_free`.
+#[no_mangle]
+pub extern "C" fn svg3dx_package_write(
+    package: *const Svg3dxPackageHandle,
+    out_error: *mut *mut c_char,
+) -> *mut Svg3dxBuffer {
+    set_out_error(out_error, None);
+    if package.is_null() {
+        set_out_error(out_error, Some("null package".into()));
+        return ptr::null_mut();
+    }
+    match write_svg3dxz(unsafe { &(*package).inner }) {
+        Ok(data) => Box::into_raw(Box::new(Svg3dxBuffer { data })),
+        Err(e) => {
+            set_out_error(out_error, Some(e.to_string()));
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn svg3dx_buffer_data(buf: *const Svg3dxBuffer) -> *const u8 {
+    if buf.is_null() {
+        return ptr::null();
+    }
+    unsafe { (&(*buf).data).as_ptr() }
+}
+
+#[no_mangle]
+pub extern "C" fn svg3dx_buffer_len(buf: *const Svg3dxBuffer) -> usize {
+    if buf.is_null() {
+        return 0;
+    }
+    unsafe { (&(*buf).data).len() }
+}
+
+#[no_mangle]
+pub extern "C" fn svg3dx_buffer_free(buf: *mut Svg3dxBuffer) {
+    if buf.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(buf));
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn svg3dx_package_free(package: *mut Svg3dxPackageHandle) {
+    if package.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(package));
+    }
+}
+
+/// Free a C string allocated by package APIs (`out_error`).
+#[no_mangle]
+pub extern "C" fn svg3dx_string_free(s: *mut c_char) {
+    if s.is_null() {
+        return;
+    }
+    unsafe {
+        drop(CString::from_raw(s));
+    }
+}
+
+fn raw_bytes<'a>(data: *const u8, data_len: usize) -> std::result::Result<&'a [u8], String> {
+    if data.is_null() && data_len != 0 {
+        return Err("null data with non-zero length".into());
+    }
+    if data_len == 0 {
+        return Ok(&[]);
+    }
+    Ok(unsafe { slice::from_raw_parts(data, data_len) })
+}
+
+fn set_out_error(out_error: *mut *mut c_char, msg: Option<String>) {
+    if out_error.is_null() {
+        return;
+    }
+    unsafe {
+        *out_error = match msg {
+            Some(m) => CString::new(m)
+                .unwrap_or_else(|_| CString::new("error").unwrap())
+                .into_raw(),
+            None => ptr::null_mut(),
+        };
     }
 }
 

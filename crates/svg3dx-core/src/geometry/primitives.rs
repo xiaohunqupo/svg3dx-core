@@ -81,17 +81,8 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
             "miterLimit",
             "path",
         ],
-        PrimitiveKind::Mesh => &[
-            "mode",
-            "position",
-            "normal",
-            "texcoord",
-            "color",
-            "colorSize",
-            "index",
-            "indexBase",
-        ],
-        PrimitiveKind::Triangles => &["point", "normal", "index"],
+        // `href` is otherwise a meta attr (s3dx:use); listed here so filter_params keeps it.
+        PrimitiveKind::Gltf => &["href"],
         PrimitiveKind::Other => &[],
     }
 }
@@ -124,10 +115,12 @@ pub fn filter_params(
     let known = known_attrs(kind);
     let mut out = IndexMap::new();
     for (k, v) in attrs {
-        if is_meta_attr(&k) {
+        let listed = known.iter().any(|n| *n == k);
+        // Meta attrs are skipped unless this kind lists them (e.g. gltf/@href).
+        if is_meta_attr(&k) && !listed {
             continue;
         }
-        if !(known.iter().any(|n| *n == k) || k == "kind_name") {
+        if !(listed || k == "kind_name") {
             // Keep unknown attrs so newer documents still work with older
             // known_attrs lists (viewer may understand them); only warn.
             warnings.push(format!(
