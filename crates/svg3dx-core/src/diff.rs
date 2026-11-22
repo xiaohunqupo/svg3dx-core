@@ -149,11 +149,13 @@ fn compare_nodes(old: &GeometryInstruction, new: &GeometryInstruction) -> Option
             BoolOp {
                 op: o0,
                 operands: a0,
+                transform: t0,
                 ..
             },
             BoolOp {
                 op: o1,
                 operands: a1,
+                transform: t1,
                 ..
             },
         ) => {
@@ -166,6 +168,9 @@ fn compare_nodes(old: &GeometryInstruction, new: &GeometryInstruction) -> Option
             let ids1: Vec<_> = a1.iter().map(|c| c.node_id()).collect();
             if ids0 != ids1 {
                 fields.structure = true;
+            }
+            if t0 != t1 {
+                fields.transform = true;
             }
         }
         (

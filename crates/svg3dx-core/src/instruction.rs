@@ -58,6 +58,9 @@ pub enum GeometryInstruction {
         op: BoolOpKind,
         styles: IndexMap<String, Value>,
         operands: Vec<GeometryInstruction>,
+        /// Bool-local × ancestors. Operands stay in the bool's local frame so
+        /// the editor gizmo can edit this wrapper without snap-back.
+        transform: Mat4x3,
     },
     Instance {
         node_id: String,
@@ -107,9 +110,9 @@ impl GeometryInstruction {
     pub fn transform(&self) -> Option<&Mat4x3> {
         match self {
             Self::Primitive { transform, .. }
+            | Self::BoolOp { transform, .. }
             | Self::Instance { transform, .. }
             | Self::Group { transform, .. } => Some(transform),
-            Self::BoolOp { .. } => None,
         }
     }
 

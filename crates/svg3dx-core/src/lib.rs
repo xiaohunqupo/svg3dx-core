@@ -519,6 +519,48 @@ mod tests {
     }
 
     #[test]
+    fn bool_transform_stays_on_wrapper() {
+        // Bool-local transform must live on BoolOp, not baked into operands —
+        // otherwise the studio gizmo writes identity/local mesh matrix and the
+        // result flies away after re-eval.
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <defs>
+            <g id="g">
+              <s3dx:bool-union
+                  s3dx:transform="matrix(1 0 0 0 1 0 0 0 1 -180 0 0)">
+                <s3dx:sphere radius="60" center="0 0 0"/>
+                <s3dx:sphere radius="20" center="40 0 0"/>
+              </s3dx:bool-union>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#g"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        let bool_op = flatten(&result.instructions[0])
+            .find(|i| matches!(i, GeometryInstruction::BoolOp { .. }))
+            .expect("bool-union");
+        let xf = bool_op.transform().expect("BoolOp.transform");
+        let m = xf.m;
+        assert!(
+            (m[9] - (-180.0)).abs() < 1e-6 && m[10].abs() < 1e-6 && m[11].abs() < 1e-6,
+            "expected bool translation -180,0,0 got {:?}",
+            &m[9..12]
+        );
+        for child in bool_op.children() {
+            let ct = child.transform().expect("operand transform");
+            assert!(
+                ct.m[9].abs() < 1e-6 && ct.m[10].abs() < 1e-6 && ct.m[11].abs() < 1e-6,
+                "operand must not inherit bool translation, got {:?}",
+                &ct.m[9..12]
+            );
+        }
+    }
+
+    #[test]
     fn path_with_line_arc_segments() {
         let svg = r##"
         <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"

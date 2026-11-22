@@ -764,19 +764,21 @@ fn eval_bool(
     visiting: &mut HashSet<String>,
 ) -> Vec<GeometryInstruction> {
     let local_xf = parse_transform_attr(el, scope, warnings);
-    let xf = local_xf.then(parent_xf);
     let node_id = path.next(op.as_str());
     let mut child_path = path.under(&node_id);
 
     push_element_scope(scope, el);
 
+    // Keep `s3dx:transform` on the BoolOp wrapper (editor gizmo target).
+    // Operands stay in the bool-local frame — baking into children left the
+    // CSG mesh at identity while the attr still held the pose (fly-away on drag).
     let mut operands = Vec::new();
     for child in el.child_elements() {
         operands.extend(eval_node(
             child,
             doc,
             scope,
-            xf,
+            Mat4x3::identity(),
             &mut child_path,
             warnings,
             group_cache,
@@ -791,14 +793,12 @@ fn eval_bool(
     if operands.is_empty() {
         return Vec::new();
     }
-    if operands.len() == 1 {
-        return operands;
-    }
     vec![GeometryInstruction::BoolOp {
         node_id,
         op,
         styles,
         operands,
+        transform: local_xf.then(parent_xf),
     }]
 }
 
