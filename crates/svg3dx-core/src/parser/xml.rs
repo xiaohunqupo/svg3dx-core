@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use roxmltree::{Document as XmlDoc, Node};
 
-use super::dom::{Document, Element, Namespace, Node as DomNode, S3DX_NS, SVG_NS};
+use super::dom::{is_s3dx_namespace, Document, Element, Namespace, Node as DomNode, S3DX_NS_0_1, SVG_NS};
 use crate::error::{Error, Result};
 
 pub fn parse_xml(input: &str) -> Result<Document> {
@@ -16,10 +16,30 @@ pub fn parse_xml(input: &str) -> Result<Document> {
         .map(|v| v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
 
+    // roxmltree stores xmlns declarations in `namespaces()`, not as normal attributes.
+    let s3dx_ns = root_node
+        .namespaces()
+        .find_map(|ns| {
+            let uri = ns.uri();
+            if is_s3dx_namespace(uri) {
+                Some(uri.to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            root_node
+                .attribute("xmlns:s3dx")
+                .filter(|uri| is_s3dx_namespace(uri))
+                .map(|uri| uri.to_string())
+        })
+        .unwrap_or_else(|| S3DX_NS_0_1.to_string());
+
     let class_rules = collect_class_rules(&root_node);
     let root = convert_element(root_node)?;
     let mut doc = Document {
         svg3d,
+        s3dx_ns,
         root,
         id_index: IndexMap::new(),
         class_rules,
@@ -30,7 +50,7 @@ pub fn parse_xml(input: &str) -> Result<Document> {
 
 fn convert_element(node: Node<'_, '_>) -> Result<Element> {
     let ns = match node.tag_name().namespace() {
-        Some(S3DX_NS) => Namespace::S3dx,
+        Some(uri) if is_s3dx_namespace(uri) => Namespace::S3dx,
         Some(SVG_NS) | None => Namespace::Svg,
         Some(_) => Namespace::Other,
     };
@@ -39,7 +59,7 @@ fn convert_element(node: Node<'_, '_>) -> Result<Element> {
         // Unprefixed attrs keep local names. s3dx-namespaced attrs (e.g. s3dx:transform)
         // are stored as `s3dx:{local}` so they never collide with SVG's `transform`.
         let key = match attr.namespace() {
-            Some(S3DX_NS) => format!("s3dx:{}", attr.name()),
+            Some(uri) if is_s3dx_namespace(uri) => format!("s3dx:{}", attr.name()),
             None => attr.name().to_string(),
             Some(ns) => format!("{{{ns}}}{}", attr.name()),
         };

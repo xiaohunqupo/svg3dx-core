@@ -742,4 +742,89 @@ mod tests {
             _ => Box::new(std::iter::once(inst)),
         }
     }
+
+    #[test]
+    fn point_ref_live_binding_same_and_nested_group() {
+        use crate::instruction::{GeometryInstruction, PrimitiveKind};
+        use crate::params::types::Value;
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.2">
+          <defs>
+            <g id="main">
+              <s3dx:point id="A" at="0 0 0"/>
+              <s3dx:point id="B" at="100 0 0"/>
+              <s3dx:line from="ref(#A)" to="ref(#B)"/>
+              <g s3dx:transform="translate(0 50 0)">
+                <s3dx:point id="C" at="10 0 0"/>
+                <s3dx:line from="ref(#A)" to="ref(#C)"/>
+              </g>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#main"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(
+            result.warnings.iter().all(|w| !w.contains("ref(#")),
+            "{:?}",
+            result.warnings
+        );
+        let prims: Vec<_> = result
+            .instructions
+            .iter()
+            .flat_map(flatten)
+            .filter_map(|i| match i {
+                GeometryInstruction::Primitive { kind, params, .. } => Some((kind, params)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            prims.iter().any(|(k, _)| **k == PrimitiveKind::Point),
+            "expected point instructions"
+        );
+        let line0 = prims.iter().find(|(k, p)| {
+            **k == PrimitiveKind::Line
+                && matches!(p.get("from"), Some(Value::Vector(v)) if (v[0] - 0.0).abs() < 1e-9)
+                && matches!(p.get("to"), Some(Value::Vector(v)) if (v[0] - 100.0).abs() < 1e-9)
+        });
+        assert!(line0.is_some(), "same-group line A→B: {:?}", prims);
+        let nested = prims.iter().find(|(k, p)| {
+            **k == PrimitiveKind::Line
+                && matches!(p.get("to"), Some(Value::Vector(v)) if (v[0] - 10.0).abs() < 1e-6)
+                && matches!(p.get("from"), Some(Value::Vector(v)) if (v[1] + 50.0).abs() < 1e-6)
+        });
+        assert!(nested.is_some(), "nested-group line A→C: {:?}", prims);
+    }
+
+    #[test]
+    fn draft_0_1_uri_still_evaluates() {
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.1">
+          <defs>
+            <g id="g1">
+              <s3dx:box length="10" width="10" height="10"/>
+            </g>
+          </defs>
+          <s3dx:model id="m" mode="solid" active="true">
+            <s3dx:use href="#g1"/>
+          </s3dx:model>
+        </svg>"##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    }
+
+    #[test]
+    fn transform_inverse_roundtrip() {
+        use crate::geometry::Mat4x3;
+        let m = Mat4x3::from_trs(10.0, -20.0, 5.0, 0.0, 45.0, 0.0, 2.0, 2.0, 2.0);
+        let inv = m.try_inverse().expect("invertible");
+        let p = [1.0, 2.0, 3.0];
+        let back = inv.transform_point(m.transform_point(p));
+        assert!((back[0] - p[0]).abs() < 1e-9);
+        assert!((back[1] - p[1]).abs() < 1e-9);
+        assert!((back[2] - p[2]).abs() < 1e-9);
+    }
 }

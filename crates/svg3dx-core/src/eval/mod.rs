@@ -15,8 +15,10 @@ use crate::instruction::{
     BoolOpKind, EvaluationResult, GeometryInstruction, MaterialDesc, ModelDesc, ModelUse,
     PrimitiveKind,
 };
-use crate::params::{resolve_attr, ParamScope, Value};
-use crate::parser::{Document, Element, Namespace};
+use crate::params::{
+    resolve_attr, resolve_attr_no_ref, resolve_attr_with, ParamScope, Value,
+};
+use crate::parser::{Document, Element, Namespace, Node as DomNode, S3DX_NS_0_1};
 
 pub struct EvalOptions {
     pub external: HashMap<String, Value>,
@@ -47,6 +49,12 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
     }
 
     let mut warnings = Vec::new();
+    if doc.s3dx_ns == S3DX_NS_0_1 && document_uses_point_features(&doc.root) {
+        warnings.push(
+            "document uses urn:s3dx:draft:0.1 with s3dx:point or ref(#id); prefer urn:s3dx:draft:0.2"
+                .into(),
+        );
+    }
     let mut scope = ParamScope::new();
     let (external, rejected) = crate::params::filter_external_params(doc, opts.external);
     for key in rejected {
@@ -93,6 +101,7 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
                                 doc,
                                 &mut scope,
                                 Mat4x3::identity(),
+                                Mat4x3::identity(),
                                 &mut path,
                                 &mut warnings,
                                 &mut group_cache,
@@ -133,6 +142,7 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
                         doc,
                         &mut scope,
                         Mat4x3::identity(),
+                                Mat4x3::identity(),
                         &mut path,
                         &mut warnings,
                         &mut group_cache,
@@ -199,6 +209,7 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
                     doc,
                     &mut scope,
                     Mat4x3::identity(),
+                                Mat4x3::identity(),
                     &mut path,
                     &mut warnings,
                     &mut group_cache,
@@ -505,12 +516,22 @@ fn eval_group(
     doc: &Document,
     scope: &mut ParamScope,
     _parent_xf: Mat4x3,
+    world_xf: Mat4x3,
     path: &mut PathCtx,
     warnings: &mut Vec<String>,
     group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
     visiting: &mut HashSet<String>,
 ) -> Vec<GeometryInstruction> {
     push_element_scope(scope, el);
+
+    // Align with `point_world_position`: named groups include their own
+    // `s3dx:transform` (and ancestors) so `ref(#id)` inverts in the same frame.
+    // Instruction transforms still stay on the wrapper Group (gizmo-friendly).
+    let world_xf = if let Some(id) = el.id() {
+        element_world_xf(doc, id, scope).unwrap_or(world_xf)
+    } else {
+        world_xf
+    };
 
     // Children stay in this group's local frame. The library / nested wrapper
     // Group carries `s3dx:transform` so the editor gizmo can edit it without
@@ -522,6 +543,7 @@ fn eval_group(
             doc,
             scope,
             Mat4x3::identity(),
+            world_xf,
             path,
             warnings,
             group_cache,
@@ -539,6 +561,7 @@ fn eval_node(
     doc: &Document,
     scope: &mut ParamScope,
     parent_xf: Mat4x3,
+    world_xf: Mat4x3,
     path: &mut PathCtx,
     warnings: &mut Vec<String>,
     group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
@@ -550,6 +573,7 @@ fn eval_node(
             // (same as if / named library groups) for editor gizmos.
             push_element_scope(scope, el);
             let local_xf = parse_transform_attr(el, scope, warnings);
+            let child_world = local_xf.then(world_xf);
             let (node_id, mut child_path) = if let Some(id) = el.id() {
                 (id.to_string(), path.child_prefix(id))
             } else {
@@ -563,6 +587,7 @@ fn eval_node(
                     doc,
                     scope,
                     Mat4x3::identity(),
+                    child_world,
                     &mut child_path,
                     warnings,
                     group_cache,
@@ -581,7 +606,7 @@ fn eval_node(
             }]
         }
         Namespace::S3dx => {
-            eval_s3dx(el, doc, scope, parent_xf, path, warnings, group_cache, visiting)
+            eval_s3dx(el, doc, scope, parent_xf, world_xf, path, warnings, group_cache, visiting)
         }
         _ => Vec::new(),
     }
@@ -593,22 +618,23 @@ fn eval_s3dx(
     doc: &Document,
     scope: &mut ParamScope,
     parent_xf: Mat4x3,
+    world_xf: Mat4x3,
     path: &mut PathCtx,
     warnings: &mut Vec<String>,
     group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
     visiting: &mut HashSet<String>,
 ) -> Vec<GeometryInstruction> {
     if matches!(el.name.as_str(), "if" | "if-not") {
-        return eval_condition(el, doc, scope, parent_xf, path, warnings, group_cache, visiting);
+        return eval_condition(el, doc, scope, parent_xf, world_xf, path, warnings, group_cache, visiting);
     }
     if el.name.starts_with("loop-") {
-        return eval_loop(el, doc, scope, parent_xf, path, warnings, group_cache, visiting);
+        return eval_loop(el, doc, scope, parent_xf, world_xf, path, warnings, group_cache, visiting);
     }
     if let Some(op) = BoolOpKind::from_local_name(&el.name) {
-        return eval_bool(op, el, doc, scope, parent_xf, path, warnings, group_cache, visiting);
+        return eval_bool(op, el, doc, scope, parent_xf, world_xf, path, warnings, group_cache, visiting);
     }
     if el.name == "use" {
-        return eval_use(el, doc, scope, parent_xf, path, warnings, group_cache, visiting);
+        return eval_use(el, doc, scope, parent_xf, world_xf, path, warnings, group_cache, visiting);
     }
     if matches!(
         el.name.as_str(),
@@ -616,7 +642,120 @@ fn eval_s3dx(
     ) {
         return Vec::new();
     }
-    eval_primitive(el, scope, parent_xf, path, warnings)
+    eval_primitive(el, doc, scope, parent_xf, world_xf, path, warnings)
+}
+
+fn document_uses_point_features(el: &Element) -> bool {
+    if el.is_s3dx("point") {
+        return true;
+    }
+    for (_, v) in &el.attrs {
+        if v.contains("ref(") {
+            return true;
+        }
+    }
+    el.child_elements().any(document_uses_point_features)
+}
+
+
+/// World transform of the element with `id` (ancestors · self), same frame as point_world.
+fn element_world_xf(
+    doc: &Document,
+    id: &str,
+    base_scope: &ParamScope,
+) -> std::result::Result<Mat4x3, crate::error::Warning> {
+    use crate::error::Warning;
+    let path = doc
+        .id_index
+        .get(id)
+        .ok_or_else(|| Warning::new(format!("id '{id}' not found")))?;
+
+    let mut scope = base_scope.clone_params_only();
+    push_root_scope(&mut scope, &doc.root);
+
+    let mut world_xf = Mat4x3::identity();
+    let mut cur = &doc.root;
+
+    for &idx in path.iter() {
+        let child = cur
+            .children
+            .get(idx)
+            .ok_or_else(|| Warning::new(format!("broken id path for '{id}'")))?;
+        let DomNode::Element(el) = child else {
+            return Err(Warning::new(format!("broken id path for '{id}'")));
+        };
+        push_element_scope(&mut scope, el);
+        let local_xf = match el.s3dx_attr("transform") {
+            Some(raw) => match resolve_attr_no_ref(raw, &scope) {
+                Ok(v) => Mat4x3::from_value(&v).unwrap_or_else(|_| Mat4x3::identity()),
+                Err(_) => Mat4x3::identity(),
+            },
+            None => Mat4x3::identity(),
+        };
+        world_xf = local_xf.then(world_xf);
+        cur = el;
+    }
+    Ok(world_xf)
+}
+
+/// World position of `<s3dx:point id>` = ancestors·self·at.
+fn point_world_position(
+    doc: &Document,
+    id: &str,
+    base_scope: &ParamScope,
+) -> std::result::Result<[f64; 3], crate::error::Warning> {
+    use crate::error::Warning;
+    let path = doc
+        .id_index
+        .get(id)
+        .ok_or_else(|| Warning::new(format!("ref(#{id}): id not found")))?;
+
+    let mut scope = base_scope.clone_params_only();
+    push_root_scope(&mut scope, &doc.root);
+
+    let mut world_xf = Mat4x3::identity();
+    let mut cur = &doc.root;
+
+    for (depth, &idx) in path.iter().enumerate() {
+        let child = cur
+            .children
+            .get(idx)
+            .ok_or_else(|| Warning::new(format!("ref(#{id}): broken id path")))?;
+        let DomNode::Element(el) = child else {
+            return Err(Warning::new(format!("ref(#{id}): broken id path")));
+        };
+        push_element_scope(&mut scope, el);
+        let local_xf = match el.s3dx_attr("transform") {
+            Some(raw) => match resolve_attr_no_ref(raw, &scope) {
+                Ok(v) => Mat4x3::from_value(&v).unwrap_or_else(|_| Mat4x3::identity()),
+                Err(_) => Mat4x3::identity(),
+            },
+            None => Mat4x3::identity(),
+        };
+        world_xf = local_xf.then(world_xf);
+        if depth + 1 == path.len() {
+            if !el.is_s3dx("point") {
+                return Err(Warning::new(format!(
+                    "ref(#{id}): target is not s3dx:point"
+                )));
+            }
+            let at = match el.attr("at") {
+                Some(raw) => resolve_attr_no_ref(raw, &scope)?,
+                None => Value::Vector(vec![0.0, 0.0, 0.0]),
+            };
+            let p = match at.as_vector() {
+                Some(v) if v.len() >= 3 => [v[0], v[1], v[2]],
+                _ => {
+                    return Err(Warning::new(format!(
+                        "s3dx:point #{id} @at must be a 3D point"
+                    )));
+                }
+            };
+            return Ok(world_xf.transform_point(p));
+        }
+        cur = el;
+    }
+    Err(Warning::new(format!("ref(#{id}): empty id path")))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -625,6 +764,7 @@ fn eval_condition(
     doc: &Document,
     scope: &mut ParamScope,
     parent_xf: Mat4x3,
+    world_xf: Mat4x3,
     path: &mut PathCtx,
     warnings: &mut Vec<String>,
     group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
@@ -646,6 +786,7 @@ fn eval_condition(
     //
     // `local_xf` only: parent transform lives on ancestor Groups (named / nested
     // g). `then(parent_xf)` remains for flat parents (e.g. loop iterations).
+    let child_world = local_xf.then(world_xf);
     let mut children = Vec::new();
     for child in el.child_elements() {
         children.extend(eval_node(
@@ -653,6 +794,7 @@ fn eval_condition(
             doc,
             scope,
             Mat4x3::identity(),
+            child_world,
             &mut child_path,
             warnings,
             group_cache,
@@ -693,6 +835,7 @@ fn eval_loop(
     doc: &Document,
     scope: &mut ParamScope,
     parent_xf: Mat4x3,
+    world_xf: Mat4x3,
     path: &mut PathCtx,
     warnings: &mut Vec<String>,
     group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
@@ -712,12 +855,14 @@ fn eval_loop(
                 scope.push_frame();
                 inject_loop_vars(scope, index, value);
                 let mut iter_path = path.child_prefix(&format!("{loop_kind}:{index}"));
+                let child_world = local_xf.then(world_xf);
                 for child in el.child_elements() {
                     out.extend(eval_node(
                         child,
                         doc,
                         scope,
                         xf,
+                        child_world,
                         &mut iter_path,
                         warnings,
                         group_cache,
@@ -732,12 +877,14 @@ fn eval_loop(
                 scope.push_frame();
                 inject_loop_vars(scope, index, Value::Number(value));
                 let mut iter_path = path.child_prefix(&format!("{loop_kind}:{index}"));
+                let child_world = local_xf.then(world_xf);
                 for child in el.child_elements() {
                     out.extend(eval_node(
                         child,
                         doc,
                         scope,
                         xf,
+                        child_world,
                         &mut iter_path,
                         warnings,
                         group_cache,
@@ -758,6 +905,7 @@ fn eval_bool(
     doc: &Document,
     scope: &mut ParamScope,
     parent_xf: Mat4x3,
+    world_xf: Mat4x3,
     path: &mut PathCtx,
     warnings: &mut Vec<String>,
     group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
@@ -772,6 +920,7 @@ fn eval_bool(
     // Keep `s3dx:transform` on the BoolOp wrapper (editor gizmo target).
     // Operands stay in the bool-local frame — baking into children left the
     // CSG mesh at identity while the attr still held the pose (fly-away on drag).
+    let child_world = local_xf.then(world_xf);
     let mut operands = Vec::new();
     for child in el.child_elements() {
         operands.extend(eval_node(
@@ -779,6 +928,7 @@ fn eval_bool(
             doc,
             scope,
             Mat4x3::identity(),
+            child_world,
             &mut child_path,
             warnings,
             group_cache,
@@ -787,6 +937,22 @@ fn eval_bool(
     }
     // Skipped if/if-not branches are preview-only — never boolean operands.
     operands.retain(|o| !o.is_inactive());
+    let before = operands.len();
+    operands.retain(|o| {
+        !matches!(
+            o,
+            GeometryInstruction::Primitive {
+                kind: PrimitiveKind::Point,
+                ..
+            }
+        )
+    });
+    if operands.len() != before {
+        warnings.push(format!(
+            "s3dx:{} skipped s3dx:point operand(s) (positioning points are not boolean solids)",
+            op.as_str()
+        ));
+    }
     let styles = scope.resolved_styles();
     scope.pop_node();
 
@@ -808,6 +974,7 @@ fn eval_use(
     doc: &Document,
     scope: &mut ParamScope,
     parent_xf: Mat4x3,
+    _world_xf: Mat4x3,
     path: &mut PathCtx,
     warnings: &mut Vec<String>,
     group_cache: &mut HashMap<String, Vec<GeometryInstruction>>,
@@ -862,6 +1029,7 @@ fn eval_use(
             doc,
             scope,
             Mat4x3::identity(),
+            Mat4x3::identity(),
             &mut target_path,
             warnings,
             group_cache,
@@ -904,8 +1072,10 @@ fn group_has_3d(el: &Element) -> bool {
 
 fn eval_primitive(
     el: &Element,
+    doc: &Document,
     scope: &mut ParamScope,
     parent_xf: Mat4x3,
+    world_xf: Mat4x3,
     path: &mut PathCtx,
     warnings: &mut Vec<String>,
 ) -> Vec<GeometryInstruction> {
@@ -923,12 +1093,29 @@ fn eval_primitive(
 
     let local_xf = parse_transform_attr(el, scope, warnings);
     let xf = local_xf.then(parent_xf);
+    // Full consumer world for live `ref(#id)` (nested groups keep instruction
+    // transforms on wrappers, so `parent_xf` is often identity here).
+    let consumer_world = local_xf.then(world_xf);
     let styles = scope.resolved_styles();
+
+    let allow_ref = kind != PrimitiveKind::Point;
+    let ref_base_scope = scope.clone_params_only();
+    let point_ref = |id: &str| -> std::result::Result<Value, crate::error::Warning> {
+        let world = point_world_position(doc, id, &ref_base_scope)?;
+        let inv = consumer_world.try_inverse().ok_or_else(|| {
+            crate::error::Warning::new(format!(
+                "ref(#{id}): consumer transform not invertible"
+            ))
+        })?;
+        let local = inv.transform_point(world);
+        Ok(Value::Vector(local.to_vec()))
+    };
 
     // Keep meta attrs that this kind lists (e.g. gltf/@href); filter_params
     // applies the same rule as a second pass for construct-child merges.
     let known = known_attrs(kind);
     let mut params = IndexMap::new();
+    let mut attr_failed = false;
     for (name, raw) in &el.attrs {
         let listed = known.iter().any(|n| *n == name.as_str());
         if is_meta_attr(name) && !listed {
@@ -938,12 +1125,22 @@ fn eval_primitive(
             params.insert(name.clone(), v.clone());
             continue;
         }
-        match resolve_attr(raw, scope) {
+        let resolved = if allow_ref && raw.contains("ref(") {
+            resolve_attr_with(raw, scope, Some(&point_ref))
+        } else if kind == PrimitiveKind::Point && name == "at" {
+            resolve_attr_no_ref(raw, scope)
+        } else {
+            resolve_attr(raw, scope)
+        };
+        match resolved {
             Ok(v) => {
                 params.insert(name.clone(), v);
             }
             Err(w) => {
                 warnings.push(format!("s3dx:{} @{name}: {}", el.name, w.message));
+                if raw.contains("ref(") {
+                    attr_failed = true;
+                }
             }
         }
     }
@@ -951,7 +1148,18 @@ fn eval_primitive(
         params.entry(k).or_insert(v);
     }
 
-    collect_construct_children(kind, el, scope, &mut params, warnings);
+    if attr_failed {
+        scope.pop_frame();
+        scope.pop_node();
+        return Vec::new();
+    }
+
+    collect_construct_children(kind, el, scope, &mut params, warnings, Some(&point_ref));
+
+    // Default `at` for positioning points.
+    if kind == PrimitiveKind::Point && !params.contains_key("at") {
+        params.insert("at".into(), Value::Vector(vec![0.0, 0.0, 0.0]));
+    }
 
     let params = filter_params(kind, params, warnings);
     scope.pop_frame();
@@ -982,13 +1190,19 @@ fn eval_child_attrs(
     child: &Element,
     scope: &ParamScope,
     warnings: &mut Vec<String>,
+    point_ref: Option<&dyn Fn(&str) -> std::result::Result<Value, crate::error::Warning>>,
 ) -> IndexMap<String, Value> {
     let mut map = IndexMap::new();
     for (name, raw) in &child.attrs {
         if is_meta_attr(name) {
             continue;
         }
-        match resolve_attr(raw, scope) {
+        let resolved = if raw.contains("ref(") {
+            resolve_attr_with(raw, scope, point_ref)
+        } else {
+            resolve_attr(raw, scope)
+        };
+        match resolved {
             Ok(v) => {
                 map.insert(name.clone(), v);
             }
@@ -1006,7 +1220,7 @@ fn eval_section(
     scope: &mut ParamScope,
     warnings: &mut Vec<String>,
 ) -> IndexMap<String, Value> {
-    let mut map = eval_child_attrs(el, scope, warnings);
+    let mut map = eval_child_attrs(el, scope, warnings, None);
     let xf = parse_transform_attr(el, scope, warnings);
     if xf != Mat4x3::identity() {
         let mut xf_map = IndexMap::new();
@@ -1034,7 +1248,7 @@ fn eval_section(
             ));
             continue;
         }
-        let mut shape = eval_child_attrs(child, scope, warnings);
+        let mut shape = eval_child_attrs(child, scope, warnings, None);
         shape.insert("tag".into(), Value::String(child.name.clone()));
         shapes.push(Value::Map(shape));
     }
@@ -1053,12 +1267,13 @@ fn eval_path(
     el: &Element,
     scope: &ParamScope,
     warnings: &mut Vec<String>,
+    point_ref: Option<&dyn Fn(&str) -> std::result::Result<Value, crate::error::Warning>>,
 ) -> IndexMap<String, Value> {
-    let mut map = eval_child_attrs(el, scope, warnings);
+    let mut map = eval_child_attrs(el, scope, warnings, point_ref);
     let mut segments = Vec::new();
     for child in el.child_elements() {
         if child.is_s3dx("line") || child.is_s3dx("arc") {
-            let mut seg = eval_child_attrs(child, scope, warnings);
+            let mut seg = eval_child_attrs(child, scope, warnings, point_ref);
             seg.insert("tag".into(), Value::String(child.name.clone()));
             segments.push(Value::Map(seg));
         } else if child.is_s3dx("exp") {
@@ -1096,6 +1311,7 @@ fn collect_construct_children(
     scope: &mut ParamScope,
     params: &mut IndexMap<String, Value>,
     warnings: &mut Vec<String>,
+    point_ref: Option<&dyn Fn(&str) -> std::result::Result<Value, crate::error::Warning>>,
 ) {
     let mut sections = Vec::new();
     let mut path_from_child = None;
@@ -1104,13 +1320,13 @@ fn collect_construct_children(
         if child.is_s3dx("section") {
             sections.push(Value::Map(eval_section(child, scope, warnings)));
         } else if child.is_s3dx("path") {
-            path_from_child = Some(Value::Map(eval_path(child, scope, warnings)));
+            path_from_child = Some(Value::Map(eval_path(child, scope, warnings, point_ref)));
         }
     }
 
     if kind == PrimitiveKind::Path {
         // Standalone path: fold segment children into params.
-        let evaluated = eval_path(el, scope, warnings);
+        let evaluated = eval_path(el, scope, warnings, point_ref);
         if evaluated.contains_key("segments") {
             params.shift_remove("points");
         }

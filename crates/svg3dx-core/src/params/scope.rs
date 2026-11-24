@@ -40,6 +40,17 @@ impl ParamScope {
         self.class_rules = rules;
     }
 
+    /// Clone external params + class rules with an empty element/frame stack
+    /// (for resolving `ref(#id)` along a fresh ancestor walk).
+    pub fn clone_params_only(&self) -> Self {
+        Self {
+            external: self.external.clone(),
+            frames: Vec::new(),
+            class_rules: self.class_rules.clone(),
+            chain: Vec::new(),
+        }
+    }
+
     pub fn push_node(
         &mut self,
         classes: Vec<String>,

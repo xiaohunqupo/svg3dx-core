@@ -41,6 +41,7 @@ pub fn known_attrs(kind: PrimitiveKind) -> &'static [&'static str] {
         ],
         PrimitiveKind::Prism => &["points", "height", "normal"],
         PrimitiveKind::SectorCylinder => &["diameter", "bottomCenterPt", "topCenterPt", "angle"],
+        PrimitiveKind::Point => &["at"],
         PrimitiveKind::Line => &["from", "to"],
         PrimitiveKind::Arc => &[
             "form",

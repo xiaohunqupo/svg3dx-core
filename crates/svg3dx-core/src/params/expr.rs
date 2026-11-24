@@ -17,16 +17,53 @@ pub fn evaluate(expr: &str, scope: &ParamScope) -> Result<Value, Warning> {
     Ok(value)
 }
 
-/// Resolve an attribute value: literal, whole `var()`/`calc()`, or embedded refs in text.
+/// Callback that resolves `ref(#id)` to a [`Value`] (typically a 3-vector).
+pub type PointRefFn<'a> = dyn Fn(&str) -> Result<Value, Warning> + 'a;
+
+/// Resolve an attribute value: literal, whole `var()`/`calc()`/`ref()`, or embedded refs.
 pub fn resolve_attr(raw: &str, scope: &ParamScope) -> Result<Value, Warning> {
+    resolve_attr_with(raw, scope, None)
+}
+
+/// Like [`resolve_attr`], but rejects any `ref(#id)` (e.g. positioning-point `at`).
+pub fn resolve_attr_no_ref(raw: &str, scope: &ParamScope) -> Result<Value, Warning> {
+    if raw.contains("ref(") {
+        return Err(Warning::new("ref(#id) is not allowed here"));
+    }
+    resolve_attr_with(raw, scope, None)
+}
+
+/// Resolve with optional `ref(#id)` handler (point / point-list attributes).
+pub fn resolve_attr_with(
+    raw: &str,
+    scope: &ParamScope,
+    point_ref: Option<&PointRefFn<'_>>,
+) -> Result<Value, Warning> {
     let s = raw.trim();
     if s.contains('[') {
         return Err(Warning::new(
             "bracket parameter refs are not supported; use var(--name)",
         ));
     }
-    if !s.contains("var(") && !s.contains("calc(") {
+    if s.contains("ref(") && point_ref.is_none() {
+        return Err(Warning::new(
+            "ref(#id) is only valid in point / point-list attributes",
+        ));
+    }
+    if !s.contains("var(") && !s.contains("calc(") && !s.contains("ref(") {
         return Ok(Value::parse_literal(s));
+    }
+    // Whole-attribute `ref(#id)`.
+    if s.starts_with("ref(") {
+        let chars: Vec<char> = s.chars().collect();
+        if let Ok((expr, next)) = take_paren_expr(&chars, 0, "ref(") {
+            let rest: String = chars[next..].iter().collect();
+            if rest.trim().is_empty() {
+                return eval_ref_call(&expr, point_ref);
+            }
+        }
+        let expanded = expand_embedded(s, scope, point_ref)?;
+        return Ok(Value::parse_literal(&expanded));
     }
     // Whole-attribute expression — but `var(--L) 0 0` is an embedded vector list.
     if s.starts_with("var(") || s.starts_with("calc(") {
@@ -35,18 +72,41 @@ pub fn resolve_attr(raw: &str, scope: &ParamScope) -> Result<Value, Warning> {
         if let Ok((_, next)) = take_paren_expr(&chars, 0, prefix) {
             let rest: String = chars[next..].iter().collect();
             if !rest.trim().is_empty() {
-                let expanded = expand_embedded(s, scope)?;
+                let expanded = expand_embedded(s, scope, point_ref)?;
                 return Ok(Value::parse_literal(&expanded));
             }
         }
         return evaluate(s, scope);
     }
-    // Embedded refs (e.g. matrix(... var(--loop-value) ...) / calc inside lists).
-    let expanded = expand_embedded(s, scope)?;
+    // Embedded refs (e.g. matrix(... var(--loop-value) ...) / ref in point lists).
+    let expanded = expand_embedded(s, scope, point_ref)?;
     Ok(Value::parse_literal(&expanded))
 }
 
-fn expand_embedded(input: &str, scope: &ParamScope) -> Result<String, Warning> {
+fn eval_ref_call(expr: &str, point_ref: Option<&PointRefFn<'_>>) -> Result<Value, Warning> {
+    let Some(cb) = point_ref else {
+        return Err(Warning::new(
+            "ref(#id) is only valid in point / point-list attributes",
+        ));
+    };
+    // expr is `ref(#id)` including parens.
+    let inner = expr
+        .strip_prefix("ref(")
+        .and_then(|s| s.strip_suffix(')'))
+        .map(str::trim)
+        .ok_or_else(|| Warning::new("invalid ref(#id)"))?;
+    let id = inner.trim_start_matches('#');
+    if id.is_empty() || inner.contains(' ') {
+        return Err(Warning::new(format!("invalid ref(#id): {expr}")));
+    }
+    cb(id)
+}
+
+fn expand_embedded(
+    input: &str,
+    scope: &ParamScope,
+    point_ref: Option<&PointRefFn<'_>>,
+) -> Result<String, Warning> {
     let mut out = String::new();
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
@@ -60,6 +120,11 @@ fn expand_embedded(input: &str, scope: &ParamScope) -> Result<String, Warning> {
         } else if rest.starts_with("var(") {
             let (expr, next) = take_paren_expr(&chars, i, "var(")?;
             let val = evaluate(&expr, scope)?;
+            out.push_str(&val.expand_for_attr());
+            i = next;
+        } else if rest.starts_with("ref(") {
+            let (expr, next) = take_paren_expr(&chars, i, "ref(")?;
+            let val = eval_ref_call(&expr, point_ref)?;
             out.push_str(&val.expand_for_attr());
             i = next;
         } else if chars[i] == '[' {

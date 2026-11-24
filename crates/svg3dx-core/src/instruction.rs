@@ -167,6 +167,7 @@ pub enum PrimitiveKind {
     Prism,
     #[serde(rename = "sector-cylinder")]
     SectorCylinder,
+    Point,
     Line,
     Arc,
     Path,
@@ -193,6 +194,7 @@ impl PrimitiveKind {
             "prism" => Self::Prism,
             // Spec name is sector-cylinder; cutcylinder kept as a read alias.
             "sector-cylinder" | "cutcylinder" => Self::SectorCylinder,
+            "point" => Self::Point,
             "line" => Self::Line,
             "arc" => Self::Arc,
             "path" => Self::Path,
@@ -218,6 +220,7 @@ impl PrimitiveKind {
             Self::Pyramid => "pyramid",
             Self::Prism => "prism",
             Self::SectorCylinder => "sector-cylinder",
+            Self::Point => "point",
             Self::Line => "line",
             Self::Arc => "arc",
             Self::Path => "path",

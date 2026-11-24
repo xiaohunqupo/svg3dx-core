@@ -1,11 +1,22 @@
 use indexmap::IndexMap;
 
-pub const S3DX_NS: &str = "urn:s3dx:draft:0.1";
+/// Stable draft 0.1 namespace (still evaluated).
+pub const S3DX_NS_0_1: &str = "urn:s3dx:draft:0.1";
+/// Evolution draft 0.2 namespace (point + ref(#id)).
+pub const S3DX_NS_0_2: &str = "urn:s3dx:draft:0.2";
+/// Alias for the oldest accepted URI (tests / callers).
+pub const S3DX_NS: &str = S3DX_NS_0_1;
 pub const SVG_NS: &str = "http://www.w3.org/2000/svg";
+
+pub fn is_s3dx_namespace(uri: &str) -> bool {
+    uri == S3DX_NS_0_1 || uri == S3DX_NS_0_2
+}
 
 #[derive(Debug, Clone)]
 pub struct Document {
     pub svg3d: bool,
+    /// Bound `xmlns:s3dx` URI when present (`urn:s3dx:draft:0.1` or `…:0.2`).
+    pub s3dx_ns: String,
     pub root: Element,
     /// id → element index path into the tree (for <s3dx:use> resolution).
     pub id_index: IndexMap<String, Vec<usize>>,

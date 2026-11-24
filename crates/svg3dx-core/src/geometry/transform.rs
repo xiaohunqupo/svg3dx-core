@@ -239,6 +239,55 @@ impl Mat4x3 {
     pub fn then(self, parent: Self) -> Self {
         parent.mul(self)
     }
+
+    /// Transform a point: `p' = M * p` (column vector).
+    pub fn transform_point(self, p: [f64; 3]) -> [f64; 3] {
+        let m = &self.m;
+        [
+            m[0] * p[0] + m[3] * p[1] + m[6] * p[2] + m[9],
+            m[1] * p[0] + m[4] * p[1] + m[7] * p[2] + m[10],
+            m[2] * p[0] + m[5] * p[1] + m[8] * p[2] + m[11],
+        ]
+    }
+
+    /// Invert an affine transform. Returns `None` if the 3×3 linear part is singular.
+    pub fn try_inverse(self) -> Option<Self> {
+        let m = &self.m;
+        let (a, b, c) = (m[0], m[1], m[2]);
+        let (d, e, f) = (m[3], m[4], m[5]);
+        let (g, h, i) = (m[6], m[7], m[8]);
+        // det = c0 · (c1 × c2)
+        let c1xc2 = [e * i - f * h, f * g - d * i, d * h - e * g];
+        let det = a * c1xc2[0] + b * c1xc2[1] + c * c1xc2[2];
+        if !det.is_finite() || det.abs() < 1e-12 {
+            return None;
+        }
+        let inv = 1.0 / det;
+        let c2xc0 = [h * c - i * b, i * a - g * c, g * b - h * a];
+        let c0xc1 = [b * f - c * e, c * d - a * f, a * e - b * d];
+        // A^{-1} rows = (c1×c2, c2×c0, c0×c1) / det → store as columns
+        let inv_m = [
+            c1xc2[0] * inv,
+            c2xc0[0] * inv,
+            c0xc1[0] * inv,
+            c1xc2[1] * inv,
+            c2xc0[1] * inv,
+            c0xc1[1] * inv,
+            c1xc2[2] * inv,
+            c2xc0[2] * inv,
+            c0xc1[2] * inv,
+        ];
+        let (tx, ty, tz) = (m[9], m[10], m[11]);
+        let itx = -(inv_m[0] * tx + inv_m[3] * ty + inv_m[6] * tz);
+        let ity = -(inv_m[1] * tx + inv_m[4] * ty + inv_m[7] * tz);
+        let itz = -(inv_m[2] * tx + inv_m[5] * ty + inv_m[8] * tz);
+        Some(Self {
+            m: [
+                inv_m[0], inv_m[1], inv_m[2], inv_m[3], inv_m[4], inv_m[5], inv_m[6], inv_m[7],
+                inv_m[8], itx, ity, itz,
+            ],
+        })
+    }
 }
 
 fn rotation_xyz_deg(rx_deg: f64, ry_deg: f64, rz_deg: f64) -> Mat4x3 {
