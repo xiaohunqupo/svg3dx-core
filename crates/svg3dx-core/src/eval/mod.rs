@@ -243,6 +243,7 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
         .or_else(|| models.first().map(|m| m.id.clone()));
 
     let materials = collect_materials(doc, &mut warnings);
+    let animations = crate::animation::collect_animations(doc, &mut warnings);
 
     if !opts.retain_inactive {
         for inst in &mut instructions {
@@ -256,6 +257,7 @@ pub fn evaluate_document(doc: &Document, opts: EvalOptions) -> Result<Evaluation
         materials,
         active_model,
         warnings,
+        animations,
     })
 }
 
@@ -638,7 +640,7 @@ fn eval_s3dx(
     }
     if matches!(
         el.name.as_str(),
-        "exp" | "model" | "section" | "materials" | "material"
+        "exp" | "model" | "section" | "materials" | "material" | "animate" | "animateTransform"
     ) {
         return Vec::new();
     }
@@ -1061,6 +1063,10 @@ fn eval_use(
 fn group_has_3d(el: &Element) -> bool {
     for child in el.child_elements() {
         if child.ns == Namespace::S3dx {
+            // Animation-only children do not count as geometry content.
+            if matches!(child.name.as_str(), "animate" | "animateTransform") {
+                continue;
+            }
             return true;
         }
         if child.is_svg("g") && group_has_3d(child) {

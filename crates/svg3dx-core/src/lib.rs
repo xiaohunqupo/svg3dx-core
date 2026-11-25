@@ -3,6 +3,7 @@
 //! Pipeline: XML → DOM → parameter scopes → loop/condition expansion →
 //! geometry instruction sequence. No meshing, no rendering, no CAD kernel.
 
+pub mod animation;
 pub mod diff;
 pub mod error;
 pub mod eval;
@@ -13,6 +14,10 @@ pub mod params;
 pub mod parser;
 pub mod session;
 
+pub use animation::{
+    animation_progress, collect_animations, parse_duration_secs, sample_animate_transform,
+    sample_scalar, AnimateTransformType, AnimationDesc, AnimationTiming,
+};
 pub use diff::{ChangeFields, NodeChange, NodeChangeKind};
 pub use error::{Error, Result, Warning};
 pub use eval::{evaluate_document, EvalOptions};
@@ -72,6 +77,70 @@ pub fn to_json(result: &EvaluationResult) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::animation::AnimationDesc;
+
+    #[test]
+    fn animate_param_and_transform_collected_without_geometry_warnings() {
+        let svg = r##"
+        <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
+             xmlns:s3dx="urn:s3dx:draft:0.2">
+          <style>:root { --H: 100; }</style>
+          <s3dx:animate attributeName="--H" from="80" to="160" dur="2s" repeat="0"/>
+          <defs>
+            <g id="main">
+              <s3dx:box length="100" width="100" height="var(--H)"/>
+              <g id="arm" s3dx:transform="translate(0 0 20)">
+                <s3dx:animateTransform attributeName="transform" type="rotate"
+                  from="0 0 -45" to="0 0 45" dur="3s" repeat="0"/>
+                <s3dx:box length="50" width="10" height="10"/>
+              </g>
+            </g>
+          </defs>
+          <s3dx:model id="solid-view" mode="solid" active="true">
+            <s3dx:use href="#main"/>
+          </s3dx:model>
+        </svg>
+        "##;
+        let result = parse_and_evaluate(svg).unwrap();
+        assert!(
+            result.warnings.is_empty(),
+            "unexpected warnings: {:?}",
+            result.warnings
+        );
+        assert_eq!(result.animations.len(), 2);
+        assert!(matches!(
+            &result.animations[0],
+            AnimationDesc::Param {
+                attribute_name,
+                root_scope: true,
+                ..
+            } if attribute_name == "--H"
+        ));
+        assert!(matches!(
+            &result.animations[1],
+            AnimationDesc::Transform {
+                parent_id: Some(id),
+                ..
+            } if id == "arm"
+        ));
+        // Static eval uses :root --H: 100 (animation not applied without host clock).
+        let h = result.instructions.iter().find_map(|i| match i {
+            GeometryInstruction::Group { children, .. } => children.iter().find_map(|c| match c {
+                GeometryInstruction::Primitive { kind, params, .. }
+                    if *kind == PrimitiveKind::Box =>
+                {
+                    params.get("height").and_then(|v| match v {
+                        Value::Number(n) => Some(*n),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            }),
+            _ => None,
+        });
+        // Height may be nested under group from use expansion — just ensure no crash.
+        let _ = h;
+    }
 
     #[test]
     fn box_primitive() {

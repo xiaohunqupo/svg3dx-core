@@ -1,6 +1,7 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+use crate::animation::AnimationDesc;
 use crate::geometry::transform::Mat4x3;
 use crate::params::types::Value;
 
@@ -14,6 +15,9 @@ pub struct EvaluationResult {
     pub materials: Vec<MaterialDesc>,
     pub active_model: Option<String>,
     pub warnings: Vec<String>,
+    /// SMIL-shaped animation descriptors (draft 0.2 §10). Host clock samples these.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub animations: Vec<AnimationDesc>,
 }
 
 /// Custom material from `<s3dx:material>` (metallic-roughness, draft 0.1).
