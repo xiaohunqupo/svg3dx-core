@@ -50,6 +50,9 @@ pub enum AnimationDesc {
     /// Parameter timeline targeting a CSS custom property (`--name`).
     Param {
         attribute_name: String,
+        /// Animation element `id` when present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
         /// Parent element `id` when present.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_id: Option<String>,
@@ -64,6 +67,9 @@ pub enum AnimationDesc {
         /// `attributeName`; semantic target is always `s3dx:transform`.
         attribute_name: String,
         transform_type: AnimateTransformType,
+        /// Animation element `id` when present.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_id: Option<String>,
         parent_tag: String,
@@ -214,6 +220,7 @@ fn parse_animate(
 
     Some(AnimationDesc::Param {
         attribute_name,
+        id: el.id().map(|s| s.to_string()),
         parent_id: parent.id().map(|s| s.to_string()),
         parent_tag: parent.name.clone(),
         root_scope,
@@ -280,6 +287,7 @@ fn parse_animate_transform(
     Some(AnimationDesc::Transform {
         attribute_name,
         transform_type,
+        id: el.id().map(|s| s.to_string()),
         parent_id: parent.id().map(|s| s.to_string()),
         parent_tag: parent.name.clone(),
         timing,
