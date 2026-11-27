@@ -1,5 +1,4 @@
 mod condition;
-mod exp;
 mod loop_eval;
 mod path;
 
@@ -640,7 +639,7 @@ fn eval_s3dx(
     }
     if matches!(
         el.name.as_str(),
-        "exp" | "model" | "section" | "materials" | "material" | "animate" | "animateTransform"
+        "model" | "section" | "materials" | "material" | "animate" | "animateTransform"
     ) {
         return Vec::new();
     }
@@ -1094,8 +1093,6 @@ fn eval_primitive(
     let node_id = path.next(kind.as_str());
 
     push_element_scope(scope, el);
-    scope.push_frame();
-    let overrides = exp::apply_exp_overrides(el, scope, warnings);
 
     let local_xf = parse_transform_attr(el, scope, warnings);
     let xf = local_xf.then(parent_xf);
@@ -1127,10 +1124,6 @@ fn eval_primitive(
         if is_meta_attr(name) && !listed {
             continue;
         }
-        if let Some(v) = overrides.get(name) {
-            params.insert(name.clone(), v.clone());
-            continue;
-        }
         let resolved = if allow_ref && raw.contains("ref(") {
             resolve_attr_with(raw, scope, Some(&point_ref))
         } else if kind == PrimitiveKind::Point && name == "at" {
@@ -1150,12 +1143,8 @@ fn eval_primitive(
             }
         }
     }
-    for (k, v) in overrides {
-        params.entry(k).or_insert(v);
-    }
 
     if attr_failed {
-        scope.pop_frame();
         scope.pop_node();
         return Vec::new();
     }
@@ -1168,7 +1157,6 @@ fn eval_primitive(
     }
 
     let params = filter_params(kind, params, warnings);
-    scope.pop_frame();
     scope.pop_node();
 
     vec![GeometryInstruction::Primitive {
@@ -1235,9 +1223,6 @@ fn eval_section(
     }
     let mut shapes = Vec::new();
     for child in el.child_elements() {
-        if child.is_s3dx("exp") {
-            continue;
-        }
         let ok = child.ns == Namespace::Svg
             && matches!(
                 child.name.as_str(),
@@ -1282,8 +1267,6 @@ fn eval_path(
             let mut seg = eval_child_attrs(child, scope, warnings, point_ref);
             seg.insert("tag".into(), Value::String(child.name.clone()));
             segments.push(Value::Map(seg));
-        } else if child.is_s3dx("exp") {
-            continue;
         } else {
             warnings.push(format!(
                 "s3dx:path ignores unexpected <{}>",

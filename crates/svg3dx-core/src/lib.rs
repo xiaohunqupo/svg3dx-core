@@ -206,10 +206,8 @@ mod tests {
           </style>
           <defs>
             <g id="g" class="box">
-              <s3dx:box length="1" width="1" height="1"
-                        lengthVec="1 0 0" widthVec="0 1 0">
-                <s3dx:exp length="var(--W)" width="var(--W)" height="var(--H)"/>
-              </s3dx:box>
+              <s3dx:box length="var(--W)" width="var(--W)" height="var(--H)"
+                        lengthVec="1 0 0" widthVec="0 1 0"/>
             </g>
           </defs>
           <s3dx:model id="m" mode="solid" active="true">
@@ -224,16 +222,14 @@ mod tests {
     }
 
     #[test]
-    fn exp_override_and_condition() {
+    fn attr_expr_and_condition() {
         let svg = r##"
         <svg svg3d="true" xmlns="http://www.w3.org/2000/svg"
              xmlns:s3dx="urn:s3dx:draft:0.1">
           <style>.tanks { --R: 50; --D: 200; }</style>
           <defs>
             <g id="tanks" class="tanks">
-              <s3dx:sphere radius="60" center="0 0 0">
-                <s3dx:exp radius="var(--R)"/>
-              </s3dx:sphere>
+              <s3dx:sphere radius="var(--R)" center="0 0 0"/>
               <s3dx:if test="var(--R) = 50">
                 <s3dx:box length="1" width="1" height="1"
                           lengthVec="1 0 0" widthVec="0 1 0"/>

@@ -768,9 +768,7 @@ mod tests {
           <style>.t { --D: 100; }</style>
           <defs>
             <g id="g" class="t">
-              <s3dx:cylinder diameter="60" bottomCenterPt="0 0 0" topCenterPt="0 0 100">
-                <s3dx:exp diameter="var(--D)"/>
-              </s3dx:cylinder>
+              <s3dx:cylinder diameter="var(--D)" bottomCenterPt="0 0 0" topCenterPt="0 0 100"/>
             </g>
           </defs>
           <s3dx:model id="m" mode="solid" active="true"><s3dx:use href="#g"/></s3dx:model>

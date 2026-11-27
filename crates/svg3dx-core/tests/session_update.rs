@@ -14,9 +14,7 @@ fn sample_svg(loop_end: &str) -> String {
           </style>
           <defs>
             <g id="group-tanks" class="tanks">
-              <s3dx:cylinder diameter="60" bottomCenterPt="0 0 0" topCenterPt="0 0 100">
-                <s3dx:exp diameter="var(--D)"/>
-              </s3dx:cylinder>
+              <s3dx:cylinder diameter="var(--D)" bottomCenterPt="0 0 0" topCenterPt="0 0 100"/>
             </g>
             <g id="group-pillars">
               <s3dx:loop-range start="0" end="{loop_end}" step="1">
@@ -210,13 +208,9 @@ fn external_rejects_non_root_and_derived() {
           </style>
           <defs>
             <g id="g" class="tanks">
-              <s3dx:sphere radius="1" center="0 0 0">
-                <s3dx:exp radius="var(--R)"/>
-              </s3dx:sphere>
-              <s3dx:box length="1" width="1" height="1"
-                        lengthVec="1 0 0" widthVec="0 1 0">
-                <s3dx:exp height="var(--H)"/>
-              </s3dx:box>
+              <s3dx:sphere radius="var(--R)" center="0 0 0"/>
+              <s3dx:box length="1" width="1" height="var(--H)"
+                        lengthVec="1 0 0" widthVec="0 1 0"/>
             </g>
           </defs>
           <s3dx:model id="m" mode="solid" active="true"><s3dx:use href="#g"/></s3dx:model>
@@ -252,10 +246,8 @@ fn declared_params_include_root_rule() {
           <style>:root { --H: 100; } .tanks { --D: 200; }</style>
           <defs>
             <g id="g" class="tanks">
-              <s3dx:box length="1" width="1" height="1"
-                        lengthVec="1 0 0" widthVec="0 1 0">
-                <s3dx:exp height="var(--H)"/>
-              </s3dx:box>
+              <s3dx:box length="1" width="1" height="var(--H)"
+                        lengthVec="1 0 0" widthVec="0 1 0"/>
             </g>
           </defs>
           <s3dx:model id="m" mode="solid" active="true"><s3dx:use href="#g"/></s3dx:model>
@@ -276,9 +268,7 @@ fn nodes_carry_resolved_styles() {
           </style>
           <defs>
             <g id="g" class="tank" style="stroke: #123456">
-              <s3dx:cylinder diameter="60" bottomCenterPt="0 0 0" topCenterPt="0 0 100">
-                <s3dx:exp diameter="var(--D)"/>
-              </s3dx:cylinder>
+              <s3dx:cylinder diameter="var(--D)" bottomCenterPt="0 0 0" topCenterPt="0 0 100"/>
             </g>
           </defs>
           <s3dx:model id="m" mode="solid" active="true"><s3dx:use href="#g"/></s3dx:model>

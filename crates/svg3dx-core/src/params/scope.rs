@@ -7,7 +7,7 @@ use std::collections::HashMap;
 pub struct ParamScope {
     /// Highest priority: host-injected external params (bare names, e.g. `D`).
     external: HashMap<String, Value>,
-    /// Stack of local frames (innermost last). Used for loop vars and s3dx:exp.
+    /// Stack of local frames (innermost last). Used for loop vars.
     frames: Vec<IndexMap<String, Value>>,
     /// Class-rule style properties: class → (CSS name → value), e.g. `--D`, `fill`.
     class_rules: HashMap<String, IndexMap<String, Value>>,
