@@ -45,7 +45,8 @@ impl Mat4x3 {
         Ok(Self { m })
     }
 
-    /// Compose TRS: `M = T · R · S` (scale, then rotate XYZ degrees, then translate).
+    /// Compose TRS: `M = T · R · S` (scale, then rotate, then translate).
+    /// `R = Rz · Ry · Rx`: a column vector rotates about the fixed axes X, then Y, then Z.
     pub fn from_trs(
         tx: f64,
         ty: f64,
@@ -298,7 +299,8 @@ fn rotation_xyz_deg(rx_deg: f64, ry_deg: f64, rz_deg: f64) -> Mat4x3 {
     let (cy, sy) = (ry.cos(), ry.sin());
     let (cz, sz) = (rz.cos(), rz.sin());
 
-    // R = Rz * Ry * Rx (THREE Euler order 'XYZ')
+    // R = Rz * Ry * Rx (fixed-axis X, then Y, then Z; THREE Euler order 'XYZ').
+    // rotate(90 90 0) = matrix(0 0 -1 1 0 0 0 -1 0 0 0 0); +X maps to -Z.
     let mx = Mat4x3 {
         m: [1.0, 0.0, 0.0, 0.0, cx, sx, 0.0, -sx, cx, 0.0, 0.0, 0.0],
     };
@@ -476,6 +478,17 @@ mod tests {
         let m = Mat4x3::parse("translate(10 20 30)").unwrap();
         let expect = Mat4x3::parse("matrix(1 0 0 0 1 0 0 0 1 10 20 30)").unwrap();
         approx_eq(&m, &expect);
+    }
+
+    #[test]
+    fn rotate_xy_90_is_rz_ry_rx() {
+        let m = Mat4x3::parse("rotate(90 90 0)").unwrap();
+        let expect = Mat4x3::parse("matrix(0 0 -1 1 0 0 0 -1 0 0 0 0)").unwrap();
+        approx_eq(&m, &expect);
+        let p = m.transform_point([1.0, 0.0, 0.0]);
+        assert!((p[0]).abs() < 1e-9);
+        assert!((p[1]).abs() < 1e-9);
+        assert!((p[2] + 1.0).abs() < 1e-9);
     }
 
     #[test]
